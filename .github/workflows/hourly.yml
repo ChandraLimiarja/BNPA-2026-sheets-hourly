@@ -3,7 +3,7 @@ name: run-hourly
 on:
   schedule:
     - cron: "0 * * * *"   # every hour (UTC)
-  workflow_dispatch:      # allow manual run via button
+  workflow_dispatch:      # manual run button
 
 jobs:
   run:
@@ -23,4 +23,4 @@ jobs:
           SHEET_URL: ${{ secrets.SHEET_URL }}
           TAB_NAME: "Test"
         run: |
-          python your_script.py
+          python BNPA.py
