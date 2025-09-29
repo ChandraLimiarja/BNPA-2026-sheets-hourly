@@ -52,7 +52,7 @@ col = "Q2r11oe"
 if col not in df.columns:
     df[col] = np.nan
 df = df[['uuid', 'Q1r1', 'Q1r2', 'Q1r3', 'Q1r4', 'Q1r5', 'Q1r6', 'Q1r7', 'Q1r8', 'Q1r9', 'QProvincer11', 'Q1_r11r10', 'Q2', 'Q2r11oe',
-    'Q3_1', 'Q3_2', 'Q3_3', 'Q3_4', 'Q3_6', 'Q3_7', 'Q3_8', 'Q3_10', 'Q5_1', 'Q3_5', 'Q3_9', 'Q4_3','Q3_image1']]
+    'Q3_1', 'Q3_2', 'Q3_3', 'Q3_4', 'Q3_6', 'Q3_7', 'Q3_8', 'Q3_10', 'Q5_1', 'Q3_5', 'Q3_9', 'Q4_2','Q3_image1']]
 
 #Q2
 mapping_Q2 = {
