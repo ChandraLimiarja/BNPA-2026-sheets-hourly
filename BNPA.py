@@ -143,40 +143,41 @@ df["Product_Image"] = df["Product_Image"].apply(
 )
 
 # --- 0) Auth + setup (Colab) ---
-from google.colab import auth
-auth.authenticate_user()
+# --- Auth + setup for GitHub Actions / any server (NO Colab imports) ---
+import os, json, pandas as pd, numpy as np, gspread
+from google.oauth2.service_account import Credentials
 
-import pandas as pd
-import numpy as np
-import gspread
-from google.auth import default
-from gspread_dataframe import set_with_dataframe  # still available if you want, but we won't rely on it here
+# Read config from GitHub Secrets / env
+SHEET_URL = os.environ["SHEET_URL"]              # set in repo secrets
+TAB_NAME  = os.environ.get("TAB_NAME", "Test")   # you can keep "Test" hardcoded if you want
 
-creds, _ = default()
+# Service Account creds from secret GOOGLE_SERVICE_ACCOUNT_JSON
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
+]
+sa_info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
+creds = Credentials.from_service_account_info(sa_info, scopes=SCOPES)
 gc = gspread.authorize(creds)
 
-SHEET_URL = "https://docs.google.com/spreadsheets/d/1U9g_BdnuCtxJar1bcbgOXsgpWpyuxqXeVM7kLnRw23I/edit?usp=sharing"
-TAB_NAME  = "Test"
+# Open spreadsheet
+sh = gc.open_by_url(SHEET_URL)
+try:
+    ws = sh.worksheet(TAB_NAME)
+except gspread.WorksheetNotFound:
+    ws = sh.add_worksheet(title=TAB_NAME, rows=1000, cols=26)
 
+# ---------- helper(s) ----------
 def to_sheet_values(df: pd.DataFrame):
     out = df.copy()
-
-    # Let columns accept None
     for c in out.columns:
         if pd.api.types.is_integer_dtype(out[c]):
-            out[c] = out[c].astype("Float64")   # nullable float
+            out[c] = out[c].astype("Float64")
         elif pd.api.types.is_string_dtype(out[c]):
-            out[c] = out[c].astype("object")    # break pandas StringDtype (<NA>)
-
-    # Turn pandas nulls into Python None (Sheets = blank)
-    out = out.where(pd.notna(out), None)
-
-    # Scrub any literal text leftovers
-    out = out.replace({
-        "<NA>": None, "nan": None, "NaN": None, "None": None
-    })
-
-    # Build 2D list with robust per-cell cleanup
+            out[c] = out[c].astype("object")
+    out = out.where(pd.notna(out), None).replace(
+        {"<NA>": None, "nan": None, "NaN": None, "None": None}
+    )
     values = []
     for _, row in out.iterrows():
         cleaned = []
