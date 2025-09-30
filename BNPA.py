@@ -160,7 +160,7 @@ gc = gspread.authorize(creds)
 
 # ---- Sheet ref: ENV > hardcoded fallback ----
 SHEET_REF = (os.environ.get("SHEET_URL") or "1U9g_BdnuCtxJar1bcbgOXsgpWpyuxqXeVM7kLnRw23I").strip().strip('"').strip("'")
-TAB_NAME  = os.environ.get("TAB_NAME", "Test")
+TAB_NAME  = os.environ.get("TAB_NAME", "Canada")
 
 def open_sheet_by_ref(gc, ref: str):
     # Accept URL or raw ID
