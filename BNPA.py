@@ -142,35 +142,33 @@ df["Product_Image"] = df["Product_Image"].apply(
     lambda x: base_url + str(x).replace(" ", "/") if pd.notna(x) and x != "" else ""
 )
 
-# --- 0) Auth + setup (Colab) ---
-# --- Auth + setup for GitHub Actions / any server (NO Colab imports) ---
-import os, json, pandas as pd, numpy as np, gspread
+# --- 0) Auth + setup  ---
+import os, re, json, pandas as pd, numpy as np, gspread
 from google.oauth2.service_account import Credentials
-# Read config from GitHub Secrets / env
-SHEET_URL = os.environ["SHEET_URL"]              # set in repo secrets
-TAB_NAME  = os.environ.get("TAB_NAME", "Test")   # you can keep "Test" hardcoded if you want
 
-# Service Account creds from secret GOOGLE_SERVICE_ACCOUNT_JSON
+# Service Account creds from secret
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
 ]
-sa_info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
+raw = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
+if not raw:
+    raise RuntimeError("GOOGLE_SERVICE_ACCOUNT_JSON is empty. Add it as a repo secret.")
+sa_info = json.loads(raw) if raw.startswith("{") else json.loads(__import__("base64").b64decode(raw).decode("utf-8"))
 creds = Credentials.from_service_account_info(sa_info, scopes=SCOPES)
 gc = gspread.authorize(creds)
 
-import os, re
-
-SHEET_REF = os.environ.get("SHEET_URL", "").strip().strip('"').strip("'")
-if not SHEET_REF:
-    raise RuntimeError("SHEET_URL is empty. Add it as a repo secret, or set it in workflow env.")
+# ---- Sheet ref: ENV > hardcoded fallback ----
+SHEET_REF = (os.environ.get("SHEET_URL") or "1U9g_BdnuCtxJar1bcbgOXsgpWpyuxqXeVM7kLnRw23I").strip().strip('"').strip("'")
+TAB_NAME  = os.environ.get("TAB_NAME", "Test")
 
 def open_sheet_by_ref(gc, ref: str):
+    # Accept URL or raw ID
     m = re.search(r"/d/([A-Za-z0-9-_]+)", ref)
-    key = m.group(1) if m else ref  # treat as raw ID if no match
+    key = m.group(1) if m else ref
     return gc.open_by_key(key)
 
-# Open spreadsheet
+# Open spreadsheet + worksheet (create if missing)
 sh = open_sheet_by_ref(gc, SHEET_REF)
 try:
     ws = sh.worksheet(TAB_NAME)
@@ -208,61 +206,37 @@ COLUMN_MAPPING = {
     # "UUID": "uuid",
 }
 
-# --- 1) Open sheet / tab ---
-sh = gc.open_by_url(SHEET_URL)
-try:
-    ws = sh.worksheet(TAB_NAME)
-except gspread.WorksheetNotFound:
-    ws = sh.add_worksheet(title=TAB_NAME, rows=1000, cols=26)
-
 # --- 2) Prepare df: apply column mapping & require 'uuid' ---
 df = df.rename(columns=COLUMN_MAPPING).copy()
 if "uuid" not in df.columns:
     raise ValueError("Your DataFrame must contain a 'uuid' column (rename via COLUMN_MAPPING if needed).")
 
-# Make sure uuid is string-like to match sheet values
 df["uuid"] = df["uuid"].astype(str)
 
-# --- 3) Decide: blank sheet vs existing sheet ---
+# --- 3) Blank vs existing sheet ---
 headers = ws.row_values(1)  # [] if empty
 is_blank = (len(headers) == 0)
 
 if is_blank:
-    # First write: ensure uuid is first column, then the rest in current df order
     ordered_cols = ["uuid"] + [c for c in df.columns if c != "uuid"]
     df_to_write = df[ordered_cols]
-
-    # Convert to values (preserve blanks) and write with headers
     headers = df_to_write.columns.tolist()
     values = to_sheet_values(df_to_write)
-
     ws.clear()
     ws.update("A1", [headers] + values, value_input_option="USER_ENTERED")
-
 else:
-    # Existing sheet: align df to sheet headers and append only new uuids
     sheet_headers = headers
-
-    # Add any missing sheet columns to df (as blank)
     for col in sheet_headers:
         if col not in df.columns:
             df[col] = None
-
-    # Keep only sheet columns (in order)
     df_aligned = df[sheet_headers]
 
-    # Existing uuids (assumes col A is 'uuid')
     first_col_vals = ws.col_values(1)  # includes header
-    existing_uuids = set(first_col_vals[1:])  # skip header
+    existing_uuids = set(first_col_vals[1:])
 
-    # Filter new rows
     new_rows = df_aligned[~df_aligned["uuid"].astype(str).isin(existing_uuids)]
-
     if not new_rows.empty:
-        # ✅ Use cleaned values, NOT astype(str)
         new_rows_values = to_sheet_values(new_rows)
-
-        # Append in chunks
         CHUNK = 500
         for i in range(0, len(new_rows_values), CHUNK):
             ws.append_rows(new_rows_values[i:i+CHUNK], value_input_option="USER_ENTERED")
