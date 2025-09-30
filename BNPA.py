@@ -146,7 +146,6 @@ df["Product_Image"] = df["Product_Image"].apply(
 # --- Auth + setup for GitHub Actions / any server (NO Colab imports) ---
 import os, json, pandas as pd, numpy as np, gspread
 from google.oauth2.service_account import Credentials
-
 # Read config from GitHub Secrets / env
 SHEET_URL = os.environ["SHEET_URL"]              # set in repo secrets
 TAB_NAME  = os.environ.get("TAB_NAME", "Test")   # you can keep "Test" hardcoded if you want
@@ -160,8 +159,19 @@ sa_info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
 creds = Credentials.from_service_account_info(sa_info, scopes=SCOPES)
 gc = gspread.authorize(creds)
 
+import os, re
+
+SHEET_REF = os.environ.get("SHEET_URL", "").strip().strip('"').strip("'")
+if not SHEET_REF:
+    raise RuntimeError("SHEET_URL is empty. Add it as a repo secret, or set it in workflow env.")
+
+def open_sheet_by_ref(gc, ref: str):
+    m = re.search(r"/d/([A-Za-z0-9-_]+)", ref)
+    key = m.group(1) if m else ref  # treat as raw ID if no match
+    return gc.open_by_key(key)
+
 # Open spreadsheet
-sh = gc.open_by_url(SHEET_URL)
+sh = open_sheet_by_ref(gc, SHEET_REF)
 try:
     ws = sh.worksheet(TAB_NAME)
 except gspread.WorksheetNotFound:
