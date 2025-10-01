@@ -363,14 +363,11 @@ def _img_session() -> requests.Session:
         "Accept": "image/*,application/json;q=0.9,*/*;q=0.8",
         "User-Agent": "DecipherImageMirror/1.0",
     })
-    if FORSTA_COOKIE:
-        # set cookie cleanly
-        first = FORSTA_COOKIE.split(";", 1)[0]
-        if "=" in first:
-            k, v = first.split("=", 1)
-            s.cookies.set(k.strip(), v.strip(), domain="sw2.decipherinc.com")
-        else:
-            s.headers["Cookie"] = FORSTA_COOKIE
+    cookie = os.getenv("FORSTA_COOKIE", "").strip()
+    if cookie:
+        # IMPORTANT: send the full multi-pair cookie string as a header.
+        # Do NOT split; :img/blob often requires multiple cookies.
+        s.headers["Cookie"] = cookie
     return s
 
 def _ext_from_mime(ctype: str) -> str:
@@ -382,14 +379,14 @@ def _ext_from_mime(ctype: str) -> str:
     return mimetypes.guess_extension(ctype) or ".bin"
 
 def _fetch_image(sess: requests.Session, url: str) -> tuple[bytes, str]:
-    # Always send same-survey Referer
-    r = sess.get(url, headers={"Referer": _origin_referer(url)}, timeout=30, allow_redirects=True)
-    if r.status_code != 200:
-        raise RuntimeError(f"GET {r.status_code} for {url}")
+    hdrs = {"Referer": _origin_referer(url)}
+    r = sess.get(url, headers=hdrs, timeout=30, allow_redirects=True)
     ctype = r.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
-    # If we got HTML, it's almost certainly a login page → treat as auth failure
-    if not ctype.startswith("image/") or (b"<form" in r.content[:4096] and b"login" in r.content[:4096].lower()):
-        raise RuntimeError(f"Got {ctype or 'unknown'} instead of image for {url} (likely not authenticated)")
+    if r.status_code != 200:
+        raise RuntimeError(f"GET {r.status_code} {ctype or ''} for {url}")
+    # login pages often return 200 text/html; detect & fail
+    if not ctype.startswith("image/"):
+        raise RuntimeError(f"Got {ctype or 'unknown'} (likely login HTML) for {url}")
     return r.content, ctype or "application/octet-stream"
 
 def _upload_image(drive, folder_id: str, name: str, blob: bytes, mime: str) -> dict:
