@@ -361,8 +361,8 @@ def build_drive_service_oauth():
     )
     return build("drive", "v3", credentials=creds, cache_discovery=False)
 
-def _drive_service(creds):
-    return build("drive", "v3", credentials=creds, cache_discovery=False)
+# def _drive_service(creds):
+#     return build("drive", "v3", credentials=creds, cache_discovery=False)
 
 def _origin_referer(img_url: str) -> str:
     # Build a same-survey referer; many :img endpoints require it
@@ -384,44 +384,44 @@ def _img_session() -> requests.Session:
         s.headers["Cookie"] = cookie  # send full string verbatim
     return s
 
-def _img_session_for_diag() -> requests.Session:
-    s = requests.Session()
-    s.headers.update({
-        "Accept": "image/*,application/json;q=0.9,*/*;q=0.8",
-        "User-Agent": "DecipherImageMirror/diag/1.0",
-    })
-    cookie = os.getenv("FORSTA_COOKIE", "").strip()
-    if cookie:
-        # IMPORTANT: send the full multi-pair Cookie header exactly as copied from the :img request
-        s.headers["Cookie"] = cookie
-    return s
+# def _img_session_for_diag() -> requests.Session:
+#     s = requests.Session()
+#     s.headers.update({
+#         "Accept": "image/*,application/json;q=0.9,*/*;q=0.8",
+#         "User-Agent": "DecipherImageMirror/diag/1.0",
+#     })
+#     cookie = os.getenv("FORSTA_COOKIE", "").strip()
+#     if cookie:
+#         # IMPORTANT: send the full multi-pair Cookie header exactly as copied from the :img request
+#         s.headers["Cookie"] = cookie
+#     return s
 
-def _ext_from_mime(ctype: str) -> str:
-    ctype = (ctype or "").split(";", 1)[0].strip().lower()
-    if ctype in ("image/jpeg", "image/jpg"): return ".jpg"
-    if ctype == "image/png": return ".png"
-    if ctype == "image/gif": return ".gif"
-    if ctype == "image/webp": return ".webp"
-    return mimetypes.guess_extension(ctype) or ".bin"
+# def _ext_from_mime(ctype: str) -> str:
+#     ctype = (ctype or "").split(";", 1)[0].strip().lower()
+#     if ctype in ("image/jpeg", "image/jpg"): return ".jpg"
+#     if ctype == "image/png": return ".png"
+#     if ctype == "image/gif": return ".gif"
+#     if ctype == "image/webp": return ".webp"
+#     return mimetypes.guess_extension(ctype) or ".bin"
 
-def _fetch_image(sess: requests.Session, url: str) -> tuple[bytes, str]:
-    hdrs = {"Referer": _origin_referer(url)}
-    r = sess.get(url, headers=hdrs, timeout=30, allow_redirects=True)
-    ctype = r.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
-    if r.status_code != 200:
-        raise RuntimeError(f"GET {r.status_code} {ctype or ''} for {url}")
-    # login pages often return 200 text/html; detect & fail
-    if not ctype.startswith("image/"):
-        raise RuntimeError(f"Got {ctype or 'unknown'} (likely login HTML) for {url}")
-    return r.content, ctype or "application/octet-stream"
+# def _fetch_image(sess: requests.Session, url: str) -> tuple[bytes, str]:
+#     hdrs = {"Referer": _origin_referer(url)}
+#     r = sess.get(url, headers=hdrs, timeout=30, allow_redirects=True)
+#     ctype = r.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+#     if r.status_code != 200:
+#         raise RuntimeError(f"GET {r.status_code} {ctype or ''} for {url}")
+#     # login pages often return 200 text/html; detect & fail
+#     if not ctype.startswith("image/"):
+#         raise RuntimeError(f"Got {ctype or 'unknown'} (likely login HTML) for {url}")
+#     return r.content, ctype or "application/octet-stream"
 
-def _upload_image(drive, folder_id: str, name: str, blob: bytes, mime: str) -> dict:
-    meta = {"name": name, "parents": [folder_id]}
-    media = MediaIoBaseUpload(io.BytesIO(blob), mimetype=(mime or "application/octet-stream"), resumable=True)
-    f = drive.files().create(body=meta, media_body=media, fields="id,webViewLink").execute()
-    drive.permissions().create(fileId=f["id"], body={"role": "reader", "type": "anyone"}).execute()
-    f["directLink"] = f"https://drive.google.com/uc?id={f['id']}"
-    return f
+# def _upload_image(drive, folder_id: str, name: str, blob: bytes, mime: str) -> dict:
+#     meta = {"name": name, "parents": [folder_id]}
+#     media = MediaIoBaseUpload(io.BytesIO(blob), mimetype=(mime or "application/octet-stream"), resumable=True)
+#     f = drive.files().create(body=meta, media_body=media, fields="id,webViewLink").execute()
+#     drive.permissions().create(fileId=f["id"], body={"role": "reader", "type": "anyone"}).execute()
+#     f["directLink"] = f"https://drive.google.com/uc?id={f['id']}"
+#     return f
 
 import time, io, os, pandas as pd
 from googleapiclient.http import MediaIoBaseUpload
