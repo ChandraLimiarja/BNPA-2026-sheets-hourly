@@ -322,6 +322,21 @@ df_can = clean_dfs["can"]
 df_usa = clean_dfs["usa"]
 df_new = clean_dfs["new"]
 
+# --- 0) Auth + setup  ---
+import os, re, json, pandas as pd, numpy as np, gspread
+from google.oauth2.service_account import Credentials
+
+SCOPES = [
+    "https://www.googleapis.com/auth/spreadsheets",
+    "https://www.googleapis.com/auth/drive",
+]
+raw = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
+if not raw:
+    raise RuntimeError("GOOGLE_SERVICE_ACCOUNT_JSON is empty. Add it as a repo secret.")
+sa_info = json.loads(raw) if raw.startswith("{") else json.loads(__import__("base64").b64decode(raw).decode("utf-8"))
+creds = Credentials.from_service_account_info(sa_info, scopes=SCOPES)
+gc = gspread.authorize(creds)
+
 # --- Mirror Product_Image (Forsta/Decipher via API) → Google Drive -----------
 import io, time, uuid as _uuidmod, mimetypes, requests
 from googleapiclient.discovery import build
@@ -407,21 +422,6 @@ def mirror_df_product_images_with_uuid(
 df_can = mirror_df_product_images_with_uuid(df_can, creds, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
 df_usa = mirror_df_product_images_with_uuid(df_usa, creds, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
 df_new = mirror_df_product_images_with_uuid(df_new, creds, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
-
-# --- 0) Auth + setup  ---
-import os, re, json, pandas as pd, numpy as np, gspread
-from google.oauth2.service_account import Credentials
-
-SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets",
-    "https://www.googleapis.com/auth/drive",
-]
-raw = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
-if not raw:
-    raise RuntimeError("GOOGLE_SERVICE_ACCOUNT_JSON is empty. Add it as a repo secret.")
-sa_info = json.loads(raw) if raw.startswith("{") else json.loads(__import__("base64").b64decode(raw).decode("utf-8"))
-creds = Credentials.from_service_account_info(sa_info, scopes=SCOPES)
-gc = gspread.authorize(creds)
 
 # ---- Sheet ref: ENV > hardcoded fallback ----
 SHEET_REF = (os.environ.get("SHEET_URL") or "1U9g_BdnuCtxJar1bcbgOXsgpWpyuxqXeVM7kLnRw23I").strip().strip('"').strip("'")
