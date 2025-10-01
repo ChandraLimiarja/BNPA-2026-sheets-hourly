@@ -338,32 +338,62 @@ creds = Credentials.from_service_account_info(sa_info, scopes=SCOPES)
 gc = gspread.authorize(creds)
 
 # --- Mirror Product_Image (Forsta/Decipher via API) → Google Drive -----------
-import io, time, uuid as _uuidmod, mimetypes, requests
+import io, time, uuid as _uuidmod, mimetypes, requests, urllib.parse
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 
 DRIVE_FOLDER_ID = "1CPUdz5rx6R6WY8mqHAu2XbrbggoY-m5m"  # your test folder
-FORSTA_API_KEY  = (os.getenv("FORSTA_API_KEY") or api_key).strip()  # use env OR the api_key variable
+
+# use GitHub secret if present, otherwise fall back to the inline api_key already defined above
+FORSTA_API_KEY = (os.getenv("FORSTA_API_KEY") or api_key).strip()
+FORSTA_COOKIE  = os.getenv("FORSTA_COOKIE", "").strip()  # optional fallback if API key alone 403s
 
 def _drive_service(creds):
     return build("drive", "v3", credentials=creds, cache_discovery=False)
 
-def _api_session() -> requests.Session:
-    if not FORSTA_API_KEY:
-        raise RuntimeError("FORSTA_API_KEY env var is empty. Set your Decipher x-apikey.")
+def _origin_referer(url: str) -> str:
+    """
+    Some Decipher :img endpoints require a Referer from the same survey host.
+    Build a safe fallback referer from the :img URL, e.g., https://sw2.decipherinc.com/rep/selfserve/<cid>/<sid>/
+    """
+    # example url: https://sw2.decipherinc.com/rep/selfserve/4475/250910:img/path/to/file.png
+    try:
+        parts = url.split("/rep/selfserve/")[1]
+        left = parts.split(":img/")[0]  # "4475/250910"
+        return f"https://sw2.decipherinc.com/rep/selfserve/{left}/"
+    except Exception:
+        # generic host-only referer if parsing fails
+        p = urllib.parse.urlsplit(url)
+        return f"{p.scheme}://{p.netloc}/"
+
+def _api_session(key: str | None = None) -> requests.Session:
+    key = (key or FORSTA_API_KEY).strip()
+    if not key:
+        raise RuntimeError("FORSTA_API_KEY/api_key missing for Decipher image GET.")
     s = requests.Session()
     s.headers.update({
-        "x-apikey": FORSTA_API_KEY,
+        "x-apikey": key,
         "Accept": "image/*,application/json;q=0.9,*/*;q=0.8",
         "User-Agent": "DecipherImageMirror/1.0",
     })
+    # Optional cookie fallback if API key alone 403s
+    if FORSTA_COOKIE:
+        first_pair = FORSTA_COOKIE.split(";", 1)[0]
+        if "=" in first_pair:
+            k, v = first_pair.split("=", 1)
+            s.cookies.set(k.strip(), v.strip())
+        else:
+            s.headers["Cookie"] = FORSTA_COOKIE
     return s
 
 def _fetch_image(sess: requests.Session, url: str) -> tuple[bytes, str]:
-    r = sess.get(url, timeout=30)
-    r.raise_for_status()
+    # Add a per-URL Referer (many :img endpoints check this)
+    hdrs = {"Referer": _origin_referer(url)}
+    r = sess.get(url, headers=hdrs, timeout=30, allow_redirects=True)
+    if r.status_code != 200:
+        raise RuntimeError(f"GET {r.status_code} for {url} (Referer={hdrs['Referer']})")
     ctype = r.headers.get("Content-Type", "").split(";", 1)[0].strip()
-    return r.content, ctype
+    return r.content, ctype or "application/octet-stream"
 
 def _upload_image(drive, folder_id: str, name: str, blob: bytes, mime: str) -> dict:
     meta = {"name": name, "parents": [folder_id]}
@@ -376,7 +406,6 @@ def _upload_image(drive, folder_id: str, name: str, blob: bytes, mime: str) -> d
     return f
 
 def _ext_from_mime(ctype: str) -> str:
-    # Map ambiguous types to safe extensions; fallback to mimetypes
     if ctype in ("image/jpeg", "image/jpg"): return ".jpg"
     if ctype == "image/png": return ".png"
     if ctype == "image/gif": return ".gif"
@@ -388,33 +417,43 @@ def mirror_df_product_images_with_uuid(
     creds,
     url_col: str = "Product_Image",
     uuid_col: str = "uuid",
-    out_col: str = "Product_Image"  # replace in place; change if you want a new column
+    out_col: str = "Product_Image"  # replace in place
 ) -> pd.DataFrame:
-    if df is None or df.empty or url_col not in df.columns:
+    if df is None or df.empty:
+        print("[mirror] DataFrame empty; skipping.")
+        return df
+    if url_col not in df.columns:
+        print(f"[mirror] column '{url_col}' not found; skipping.")
         return df
     if uuid_col not in df.columns:
-        raise KeyError(f"Column '{uuid_col}' not found; required to name files.")
+        print(f"[mirror] column '{uuid_col}' not found; skipping.")
+        return df
 
     drive = _drive_service(creds)
-    sess  = _api_session()
+    sess  = _api_session(api_key)  # ← use your inline api_key by default
+
+    # quick visibility check
+    print("[mirror] sample URLs:",
+          df[url_col].dropna().astype(str).head(3).tolist())
 
     new_links: list[str] = []
     for url, u in zip(df[url_col].astype(str).fillna(""), df[uuid_col].astype(str).fillna("")):
         url = (url or "").strip()
-        u   = (u or "").strip() or _uuidmod.uuid4().hex  # safety
+        u   = (u or "").strip() or _uuidmod.uuid4().hex
         if not url:
             new_links.append("")
             continue
         try:
             blob, ctype = _fetch_image(sess, url)
             ext = _ext_from_mime(ctype)
-            safe_name = f"{u}{ext}"  # ← filename = uuid + proper extension
+            safe_name = f"{u}{ext}"                  # filename = uuid + extension
             info = _upload_image(drive, DRIVE_FOLDER_ID, safe_name, blob, ctype)
-            new_links.append(info["directLink"])  # or info["webViewLink"]
+            new_links.append(info["directLink"])     # or info["webViewLink"]
+            print(f"[mirror] ok {u} → {info['directLink']}")
         except Exception as e:
-            print(f"[mirror] {u} | failed {url} → {e}")
+            print(f"[mirror] FAIL {u} | {url} → {e}")
             new_links.append("")
-        time.sleep(0.1)  # gentle rate limit
+        time.sleep(0.1)
     df[out_col] = new_links
     return df
 
