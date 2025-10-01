@@ -365,10 +365,71 @@ def _img_session() -> requests.Session:
     })
     cookie = os.getenv("FORSTA_COOKIE", "").strip()
     if cookie:
-        # IMPORTANT: send the full multi-pair cookie string as a header.
-        # Do NOT split; :img/blob often requires multiple cookies.
+        s.headers["Cookie"] = cookie  # send full string verbatim
+    return s
+
+def _img_session_for_diag() -> requests.Session:
+    s = requests.Session()
+    s.headers.update({
+        "Accept": "image/*,application/json;q=0.9,*/*;q=0.8",
+        "User-Agent": "DecipherImageMirror/diag/1.0",
+    })
+    cookie = os.getenv("FORSTA_COOKIE", "").strip()
+    if cookie:
+        # IMPORTANT: send the full multi-pair Cookie header exactly as copied from the :img request
         s.headers["Cookie"] = cookie
     return s
+
+def diag_mirror_single(df, creds, label: str, drive_folder_id: str):
+    """Diagnose auth, fetch, and Drive write with a single row. Does NOT modify the DF."""
+    try:
+        # 0) Confirm there is a URL to test
+        ser = df.loc[df["Product_Image"].astype(str).str.strip() != "", ["uuid","Product_Image"]].head(1)
+        if ser.empty:
+            print(f"[diag:{label}] No non-empty Product_Image to test.")
+            return
+        row = ser.iloc[0]
+        u = str(row["uuid"])
+        url = str(row["Product_Image"]).strip()
+        print(f"[diag:{label}] Test uuid={u}")
+        print(f"[diag:{label}] URL={url}")
+
+        # 1) Try fetching the image with Cookie + Referer
+        sess = _img_session_for_diag()
+        ref  = _origin_referer(url)
+        r = sess.get(url, headers={"Referer": ref}, timeout=30, allow_redirects=True)
+        ctype = r.headers.get("Content-Type", "").split(";",1)[0].lower()
+        print(f"[diag:{label}] fetch status={r.status_code}, ctype={ctype}, final_url={r.url}")
+
+        # Heuristic: if we got HTML/login instead of image, show first bytes
+        head_bytes = r.content[:256]
+        if r.status_code != 200:
+            print(f"[diag:{label}] FAIL: non-200 from :img fetch")
+            return
+        if not ctype.startswith("image/"):
+            print(f"[diag:{label}] FAIL: not an image (likely login); first bytes={head_bytes[:80]!r}")
+            return
+
+        # 2) Try uploading a tiny dummy file to Drive to check folder permissions
+        drive = build("drive", "v3", credentials=creds, cache_discovery=False)
+        dummy_meta = {"name": f"diag_{label}_{u}.txt", "parents": [drive_folder_id]}
+        dummy_media = MediaIoBaseUpload(io.BytesIO(b"diag-ok"), mimetype="text/plain", resumable=False)
+        dummy_file = drive.files().create(body=dummy_meta, media_body=dummy_media, fields="id").execute()
+        print(f"[diag:{label}] drive dummy upload OK id={dummy_file['id']}")
+
+        # 3) Try uploading the fetched image
+        from mimetypes import guess_extension
+        ext = guess_extension(ctype) or ".bin"
+        img_meta = {"name": f"{u}{ext}", "parents": [drive_folder_id]}
+        img_media = MediaIoBaseUpload(io.BytesIO(r.content), mimetype=ctype, resumable=False)
+        img_file = drive.files().create(body=img_meta, media_body=img_media, fields="id,webViewLink").execute()
+        # make link-viewable
+        drive.permissions().create(fileId=img_file["id"], body={"role": "reader", "type": "anyone"}).execute()
+        direct = f"https://drive.google.com/uc?id={img_file['id']}"
+        print(f"[diag:{label}] drive image upload OK id={img_file['id']}, direct={direct}")
+        print(f"[diag:{label}] ✅ End-to-end OK. If batch still blanks, the bug is in the loop/assignment.")
+    except Exception as e:
+        print(f"[diag:{label}] EXCEPTION: {e}")
 
 def _ext_from_mime(ctype: str) -> str:
     ctype = (ctype or "").split(";", 1)[0].strip().lower()
@@ -432,6 +493,13 @@ def mirror_df_product_images_with_uuid(df, creds, url_col="Product_Image", uuid_
     df[out_col] = new_links
     return df
 
+SERVICE_ACCOUNT_EMAIL = getattr(creds, "service_account_email", None)
+print("[diag] SA email:", SERVICE_ACCOUNT_EMAIL or "<unknown>")
+print("[diag] DRIVE_FOLDER_ID:", os.getenv("DRIVE_FOLDER_ID", "1CPUdz5rx6R6WY8mqHAu2XbrbggoY-m5m"))
+
+diag_mirror_single(df_can, creds, "can", "1CPUdz5rx6R6WY8mqHAu2XbrbggoY-m5m")
+diag_mirror_single(df_usa, creds, "usa", "1CPUdz5rx6R6WY8mqHAu2XbrbggoY-m5m")
+diag_mirror_single(df_new, creds, "new", "1CPUdz5rx6R6WY8mqHAu2XbrbggoY-m5m")
 # Replace Decipher URLs with Drive links (named after df['uuid'])
 df_can = mirror_df_product_images_with_uuid(df_can, creds, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
 df_usa = mirror_df_product_images_with_uuid(df_usa, creds, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
