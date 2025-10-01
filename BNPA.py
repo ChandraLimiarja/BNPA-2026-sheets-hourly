@@ -345,6 +345,22 @@ from googleapiclient.http import MediaIoBaseUpload
 DRIVE_FOLDER_ID = "1CPUdz5rx6R6WY8mqHAu2XbrbggoY-m5m"  # your test folder
 FORSTA_COOKIE  = os.getenv("FORSTA_COOKIE", "").strip()  # decipher_session=...
 
+import os
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+
+def build_drive_service_oauth():
+    scopes = ["https://www.googleapis.com/auth/drive.file"]
+    creds = Credentials(
+        None,
+        refresh_token=os.environ["OAUTH_REFRESH_TOKEN"],
+        client_id=os.environ["OAUTH_CLIENT_ID"],
+        client_secret=os.environ["OAUTH_CLIENT_SECRET"],
+        token_uri="https://oauth2.googleapis.com/token",
+        scopes=scopes,
+    )
+    return build("drive", "v3", credentials=creds, cache_discovery=False)
+
 def _drive_service(creds):
     return build("drive", "v3", credentials=creds, cache_discovery=False)
 
@@ -411,7 +427,7 @@ def diag_mirror_single(df, creds, label: str, drive_folder_id: str):
             return
 
         # 2) Try uploading a tiny dummy file to Drive to check folder permissions
-        drive = build("drive", "v3", credentials=creds, cache_discovery=False)
+        drive = build_drive_service_oauth()
         dummy_meta = {"name": f"diag_{label}_{u}.txt", "parents": [drive_folder_id]}
         dummy_media = MediaIoBaseUpload(io.BytesIO(b"diag-ok"), mimetype="text/plain", resumable=False)
         dummy_file = drive.files().create(body=dummy_meta, media_body=dummy_media, fields="id").execute()
