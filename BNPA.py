@@ -322,6 +322,92 @@ df_can = clean_dfs["can"]
 df_usa = clean_dfs["usa"]
 df_new = clean_dfs["new"]
 
+# --- Mirror Product_Image (Forsta/Decipher via API) → Google Drive -----------
+import io, time, uuid as _uuidmod, mimetypes, requests
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseUpload
+
+DRIVE_FOLDER_ID = "1CPUdz5rx6R6WY8mqHAu2XbrbggoY-m5m"  # your test folder
+FORSTA_API_KEY  = os.getenv("FORSTA_API_KEY", "").strip()  # REQUIRED (x-apikey)
+
+def _drive_service(creds):
+    return build("drive", "v3", credentials=creds, cache_discovery=False)
+
+def _api_session() -> requests.Session:
+    if not FORSTA_API_KEY:
+        raise RuntimeError("FORSTA_API_KEY env var is empty. Set your Decipher x-apikey.")
+    s = requests.Session()
+    s.headers.update({
+        "x-apikey": FORSTA_API_KEY,
+        "Accept": "image/*,application/json;q=0.9,*/*;q=0.8",
+        "User-Agent": "DecipherImageMirror/1.0",
+    })
+    return s
+
+def _fetch_image(sess: requests.Session, url: str) -> tuple[bytes, str]:
+    r = sess.get(url, timeout=30)
+    r.raise_for_status()
+    ctype = r.headers.get("Content-Type", "").split(";", 1)[0].strip()
+    return r.content, ctype
+
+def _upload_image(drive, folder_id: str, name: str, blob: bytes, mime: str) -> dict:
+    meta = {"name": name, "parents": [folder_id]}
+    media = MediaIoBaseUpload(io.BytesIO(blob), mimetype=(mime or "application/octet-stream"), resumable=True)
+    f = drive.files().create(body=meta, media_body=media,
+                             fields="id,webViewLink,webContentLink").execute()
+    # Make link-viewable (remove if you want to keep private)
+    drive.permissions().create(fileId=f["id"], body={"role": "reader", "type": "anyone"}).execute()
+    f["directLink"] = f"https://drive.google.com/uc?id={f['id']}"
+    return f
+
+def _ext_from_mime(ctype: str) -> str:
+    # Map ambiguous types to safe extensions; fallback to mimetypes
+    if ctype in ("image/jpeg", "image/jpg"): return ".jpg"
+    if ctype == "image/png": return ".png"
+    if ctype == "image/gif": return ".gif"
+    if ctype == "image/webp": return ".webp"
+    return mimetypes.guess_extension(ctype) or ".bin"
+
+def mirror_df_product_images_with_uuid(
+    df: pd.DataFrame,
+    creds,
+    url_col: str = "Product_Image",
+    uuid_col: str = "uuid",
+    out_col: str = "Product_Image"  # replace in place; change if you want a new column
+) -> pd.DataFrame:
+    if df is None or df.empty or url_col not in df.columns:
+        return df
+    if uuid_col not in df.columns:
+        raise KeyError(f"Column '{uuid_col}' not found; required to name files.")
+
+    drive = _drive_service(creds)
+    sess  = _api_session()
+
+    new_links: list[str] = []
+    for url, u in zip(df[url_col].astype(str).fillna(""), df[uuid_col].astype(str).fillna("")):
+        url = (url or "").strip()
+        u   = (u or "").strip() or _uuidmod.uuid4().hex  # safety
+        if not url:
+            new_links.append("")
+            continue
+        try:
+            blob, ctype = _fetch_image(sess, url)
+            ext = _ext_from_mime(ctype)
+            safe_name = f"{u}{ext}"  # ← filename = uuid + proper extension
+            info = _upload_image(drive, DRIVE_FOLDER_ID, safe_name, blob, ctype)
+            new_links.append(info["directLink"])  # or info["webViewLink"]
+        except Exception as e:
+            print(f"[mirror] {u} | failed {url} → {e}")
+            new_links.append("")
+        time.sleep(0.1)  # gentle rate limit
+    df[out_col] = new_links
+    return df
+
+# Replace Decipher URLs with Drive links (named after df['uuid'])
+df_can = mirror_df_product_images_with_uuid(df_can, creds, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
+df_usa = mirror_df_product_images_with_uuid(df_usa, creds, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
+df_new = mirror_df_product_images_with_uuid(df_new, creds, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
+
 # --- 0) Auth + setup  ---
 import os, re, json, pandas as pd, numpy as np, gspread
 from google.oauth2.service_account import Credentials
