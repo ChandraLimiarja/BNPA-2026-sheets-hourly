@@ -1,8 +1,8 @@
 name: run-hourly
 
 on:
-  # schedule:
-  #   - cron: "0 * * * *"   # every hour (UTC)
+  schedule:
+    - cron: "0 * * * *"   # every hour (UTC)
   workflow_dispatch:      # manual run button
 
 jobs:
