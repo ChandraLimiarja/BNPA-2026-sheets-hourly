@@ -500,12 +500,6 @@ print("[diag] DRIVE_FOLDER_ID:", os.getenv("DRIVE_FOLDER_ID", "1CPUdz5rx6R6WY8mq
 drive = build_drive_service_oauth()
 FOLDER_ID = os.getenv("UPLOAD_FOLDER_ID", "1CPUdz5rx6R6WY8mqHAu2XbrbggoY-m5m")
 
-# Replace Decipher URLs with Drive links (named after df['uuid'])
-# after you’ve built drive = build_drive_service_oauth() and FOLDER_ID
-df_can = mirror_df_product_images_with_uuid(df_can, drive, FOLDER_ID, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
-df_usa = mirror_df_product_images_with_uuid(df_usa, drive, FOLDER_ID, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
-df_new = mirror_df_product_images_with_uuid(df_new, drive, FOLDER_ID, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
-
 # ---- Sheet ref: ENV > hardcoded fallback ----
 SHEET_REF = (os.environ.get("SHEET_URL") or "1U9g_BdnuCtxJar1bcbgOXsgpWpyuxqXeVM7kLnRw23I").strip().strip('"').strip("'")
 
@@ -515,6 +509,45 @@ def open_sheet_by_ref(gc, ref: str):
     return gc.open_by_key(key)
 
 sh = open_sheet_by_ref(gc, SHEET_REF)  # open once
+
+# --- Exclude UUIDs that already exist in the target sheet tabs ---
+
+def get_existing_uuids(sh, tab_name: str) -> set[str]:
+    """Return a set of UUIDs from column A (skips header). If tab is missing, return empty set."""
+    import gspread
+    try:
+        ws = sh.worksheet(tab_name)
+    except gspread.WorksheetNotFound:
+        return set()
+    # read col A; skip header; strip blanks
+    col = ws.col_values(1)[1:]
+    return {v.strip() for v in col if isinstance(v, str) and v.strip()}
+
+def filter_new_rows(df: pd.DataFrame, existing: set[str]) -> pd.DataFrame:
+    if df is None or df.empty or "uuid" not in df.columns:
+        return df
+    uu = df["uuid"].astype(str).str.strip()
+    mask_new = uu.ne("") & ~uu.isin(existing)
+    kept = mask_new.sum()
+    skipped = (~mask_new).sum()
+    print(f"[pre-mirror] keeping {kept} new rows, skipping {skipped} existing")
+    return df.loc[mask_new].copy()
+
+# Read existing UUIDs per tab
+uuids_can = get_existing_uuids(sh, "Canada")
+uuids_usa = get_existing_uuids(sh, "USA")
+uuids_new = get_existing_uuids(sh, "New & Noteworthy")
+
+# Filter dataframes BEFORE mirroring/uploads
+df_can = filter_new_rows(df_can, uuids_can)
+df_usa = filter_new_rows(df_usa, uuids_usa)
+df_new = filter_new_rows(df_new, uuids_new)
+
+# Replace Decipher URLs with Drive links (named after df['uuid'])
+# after you’ve built drive = build_drive_service_oauth() and FOLDER_ID
+df_can = mirror_df_product_images_with_uuid(df_can, drive, FOLDER_ID, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
+df_usa = mirror_df_product_images_with_uuid(df_usa, drive, FOLDER_ID, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
+df_new = mirror_df_product_images_with_uuid(df_new, drive, FOLDER_ID, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
 
 # ---------- helper(s) ----------
 def to_sheet_values(df: pd.DataFrame):
