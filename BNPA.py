@@ -146,7 +146,6 @@ df["Product_Image"] = df["Product_Image"].apply(
 import os, re, json, pandas as pd, numpy as np, gspread
 from google.oauth2.service_account import Credentials
 
-# Service Account creds from secret
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
@@ -160,20 +159,13 @@ gc = gspread.authorize(creds)
 
 # ---- Sheet ref: ENV > hardcoded fallback ----
 SHEET_REF = (os.environ.get("SHEET_URL") or "1U9g_BdnuCtxJar1bcbgOXsgpWpyuxqXeVM7kLnRw23I").strip().strip('"').strip("'")
-TAB_NAME  = os.environ.get("TAB_NAME", "Canada")
 
 def open_sheet_by_ref(gc, ref: str):
-    # Accept URL or raw ID
     m = re.search(r"/d/([A-Za-z0-9-_]+)", ref)
     key = m.group(1) if m else ref
     return gc.open_by_key(key)
 
-# Open spreadsheet + worksheet (create if missing)
-sh = open_sheet_by_ref(gc, SHEET_REF)
-try:
-    ws = sh.worksheet(TAB_NAME)
-except gspread.WorksheetNotFound:
-    ws = sh.add_worksheet(title=TAB_NAME, rows=1000, cols=26)
+sh = open_sheet_by_ref(gc, SHEET_REF)  # open once
 
 # ---------- helper(s) ----------
 def to_sheet_values(df: pd.DataFrame):
@@ -201,44 +193,78 @@ def to_sheet_values(df: pd.DataFrame):
         values.append(cleaned)
     return values
 
-# OPTIONAL: if your DataFrame has a different uuid column name, map it here
-COLUMN_MAPPING = {
-    # "UUID": "uuid",
-}
+def write_new_rows_by_key(sh, tab_name: str, df: pd.DataFrame, key_col="uuid", column_mapping=None) -> int:
+    """
+    Create tab if missing. If tab is blank: write headers + all rows.
+    Else: align to existing headers and append only new rows by key_col.
+    Returns number of rows written/appended. Skips if df is empty.
+    """
+    if df is None or df.empty:
+        return 0
 
-# --- 2) Prepare df: apply column mapping & require 'uuid' ---
-df = df.rename(columns=COLUMN_MAPPING).copy()
-if "uuid" not in df.columns:
-    raise ValueError("Your DataFrame must contain a 'uuid' column (rename via COLUMN_MAPPING if needed).")
+    if column_mapping:
+        df = df.rename(columns=column_mapping).copy()
 
-df["uuid"] = df["uuid"].astype(str)
+    if key_col not in df.columns:
+        raise ValueError(f"DataFrame must include key column '{key_col}'")
 
-# --- 3) Blank vs existing sheet ---
-headers = ws.row_values(1)  # [] if empty
-is_blank = (len(headers) == 0)
+    # normalize key to string (and strip whitespace just in case)
+    df[key_col] = df[key_col].astype(str).str.strip()
 
-if is_blank:
-    ordered_cols = ["uuid"] + [c for c in df.columns if c != "uuid"]
-    df_to_write = df[ordered_cols]
-    headers = df_to_write.columns.tolist()
-    values = to_sheet_values(df_to_write)
-    ws.clear()
-    ws.update("A1", [headers] + values, value_input_option="USER_ENTERED")
-else:
-    sheet_headers = headers
-    for col in sheet_headers:
+    try:
+        ws = sh.worksheet(tab_name)
+    except gspread.WorksheetNotFound:
+        ws = sh.add_worksheet(title=tab_name, rows=1000, cols=26)
+
+    headers = ws.row_values(1)
+
+    if not headers:
+        # blank tab: put key first, then the rest
+        ordered = [key_col] + [c for c in df.columns if c != key_col]
+        df_to_write = df[ordered]
+        ws.clear()
+        ws.update("A1", [df_to_write.columns.tolist()] + to_sheet_values(df_to_write),
+                  value_input_option="USER_ENTERED")
+        return len(df_to_write)
+
+    # align df to existing headers (add missing as blank; drop extras)
+    for col in headers:
         if col not in df.columns:
             df[col] = None
-    df_aligned = df[sheet_headers]
+    df = df[headers]
 
-    first_col_vals = ws.col_values(1)  # includes header
-    existing_uuids = set(first_col_vals[1:])
+    # existing keys (assumes key is in column A)
+    existing_keys = set(v.strip() for v in ws.col_values(1)[1:])  # skip header + trim
+    new_rows = df[~df[key_col].astype(str).str.strip().isin(existing_keys)]
+    if new_rows.empty:
+        return 0
 
-    new_rows = df_aligned[~df_aligned["uuid"].astype(str).isin(existing_uuids)]
-    if not new_rows.empty:
-        new_rows_values = to_sheet_values(new_rows)
-        CHUNK = 500
-        for i in range(0, len(new_rows_values), CHUNK):
-            ws.append_rows(new_rows_values[i:i+CHUNK], value_input_option="USER_ENTERED")
+    values = to_sheet_values(new_rows)
+    CHUNK = 500
+    for i in range(0, len(values), CHUNK):
+        ws.append_rows(values[i:i+CHUNK], value_input_option="USER_ENTERED")
+    return len(new_rows)
 
-print("Done. Sheet updated.")
+# ---------- calls for your three datasets ----------
+# Assumes df_can, df_usa, df_new are built above and include 'uuid'
+results = []
+
+try:
+    n_can = write_new_rows_by_key(sh, "Canada", df_can, key_col="uuid")
+    results.append(f"Canada: +{n_can} rows")
+except Exception as e:
+    results.append(f"Canada: ERROR {e}")
+
+try:
+    n_usa = write_new_rows_by_key(sh, "USA", df_usa, key_col="uuid")
+    results.append(f"USA: +{n_usa} rows")
+except Exception as e:
+    results.append(f"USA: ERROR {e}")
+
+try:
+    n_new = write_new_rows_by_key(sh, "New & Noteworthy", df_new, key_col="uuid")
+    results.append(f"New & Noteworthy: +{n_new} rows")
+except Exception as e:
+    results.append(f"New & Noteworthy: ERROR {e}")
+
+print(" | ".join(results))
