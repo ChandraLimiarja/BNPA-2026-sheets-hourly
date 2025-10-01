@@ -1,4 +1,5 @@
 # oauth_bootstrap.py
+pip install google-auth-oauthlib google-api-python-client
 from google_auth_oauthlib.flow import InstalledAppFlow
 
 SCOPES = ["https://www.googleapis.com/auth/drive.file"]  # create/manage files you create
