@@ -426,19 +426,48 @@ def _img_session() -> requests.Session:
 import time, io, os, pandas as pd
 from googleapiclient.http import MediaIoBaseUpload
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import itertools
+
+def _is_drive_link(x: str) -> bool:
+    x = (x or "").lower()
+    return ("drive.google.com/uc?id=" in x) or ("drive.google.com/open?id=" in x)
+
+def _build_drive_service_oauth_worker():
+    # Create a fresh Drive client for each worker (googleapiclient isn’t thread-safe).
+    return build_drive_service_oauth()
+
+def _fetch_and_upload_one(url: str, u: str, folder_id: str, cookie_sess: requests.Session) -> str | None:
+    # 1) fetch
+    ref = _origin_referer(url)
+    r = cookie_sess.get(url, headers={"Referer": ref}, timeout=30, allow_redirects=True)
+    ctype = (r.headers.get("Content-Type","").split(";",1)[0] or "").lower()
+    if r.status_code != 200 or not ctype.startswith("image/"):
+        raise RuntimeError(f":img fetch {r.status_code} {ctype}")
+
+    # 2) upload (fresh Drive client per thread)
+    drive_local = _build_drive_service_oauth_worker()
+    ext = (".png" if "png" in ctype else ".jpg") if ctype.startswith("image/") else ".bin"
+    safe_name = f"{u}{ext}"
+    media = MediaIoBaseUpload(io.BytesIO(r.content), mimetype=ctype, resumable=False)
+    f = drive_local.files().create(
+        body={"name": safe_name, "parents": [folder_id]},
+        media_body=media,
+        fields="id",
+    ).execute()
+
+    # IMPORTANT: no per-file permissions call — rely on folder-level link sharing.
+    return f"https://drive.google.com/uc?id={f['id']}"
+
 def mirror_df_product_images_with_uuid(
     df: pd.DataFrame,
-    drive,
+    drive,                 # kept for signature compatibility; not used by workers
     folder_id: str,
     url_col: str = "Product_Image",
     uuid_col: str = "uuid",
     out_col: str = "Product_Image",
+    max_workers: int = 4,  # bump to 6–8 if your job is network-bound and stable
 ) -> pd.DataFrame:
-    """
-    For each row: fetch :img URL (using your existing _img_session / _origin_referer),
-    upload to Drive (OAuth), and write the Drive direct link back to df[out_col].
-    Keeps original URL when upload fails.
-    """
     if df is None or df.empty:
         print("[mirror] skip: empty df")
         return df
@@ -446,51 +475,57 @@ def mirror_df_product_images_with_uuid(
         print(f"[mirror] skip: missing {url_col} or {uuid_col}")
         return df
 
-    df = df.copy()  # avoid SettingWithCopy
-    sess = _img_session()  # your cookie-based session that worked in diag
-    ok = fail = 0
-    new_links: list[str] = []
+    df = df.copy()
+    sess = _img_session()
 
+    # Pre-filter: skip rows already mirrored, and those with blank url/uuid
+    rows = []
     for url, u in zip(df[url_col].astype(str), df[uuid_col].astype(str)):
         url = (url or "").strip()
         u   = (u or "").strip()
-        if not url or not u:
-            new_links.append("")  # or keep url if you prefer
-            continue
+        if not url or not u or _is_drive_link(url):
+            rows.append(None)  # placeholder; we’ll keep as-is/blank below
+        else:
+            rows.append((url, u))
 
-        try:
-            # fetch image (same as your working diag)
-            ref = _origin_referer(url)
-            r = sess.get(url, headers={"Referer": ref}, timeout=30, allow_redirects=True)
-            ctype = (r.headers.get("Content-Type","").split(";",1)[0] or "").lower()
-            if r.status_code != 200 or not ctype.startswith("image/"):
-                raise RuntimeError(f":img fetch {r.status_code} {ctype}")
+    results = [None] * len(rows)
+    ok = fail = 0
 
-            # upload to Drive
-            ext = (".png" if "png" in ctype else ".jpg") if ctype.startswith("image/") else ".bin"
-            safe_name = f"{u}{ext}"
-            media = MediaIoBaseUpload(io.BytesIO(r.content), mimetype=ctype, resumable=False)
-            f = drive.files().create(
-                body={"name": safe_name, "parents": [folder_id]},
-                media_body=media,
-                fields="id",
-            ).execute()
-            # make public (optional)
-            drive.permissions().create(fileId=f["id"], body={"role": "reader", "type": "anyone"}).execute()
-            direct = f"https://drive.google.com/uc?id={f['id']}"
+    # Threaded fetch+upload
+    with ThreadPoolExecutor(max_workers=max_workers) as ex:
+        future_idx = {}
+        for idx, job in enumerate(rows):
+            if job is None:
+                continue
+            url, u = job
+            fut = ex.submit(_fetch_and_upload_one, url, u, folder_id, sess)
+            future_idx[fut] = idx
 
-            new_links.append(direct)
-            ok += 1
-        except Exception as e:
-            print(f"[mirror] FAIL {u} → {e}")
-            # keep original URL if you’d rather not blank it:
-            new_links.append("")  # or: new_links.append(url)
-            fail += 1
+        for fut in as_completed(future_idx):
+            idx = future_idx[fut]
+            try:
+                direct = fut.result()
+                results[idx] = direct
+                ok += 1
+            except Exception as e:
+                results[idx] = None
+                fail += 1
+                print(f"[mirror] FAIL idx={idx} → {e}")
 
-        time.sleep(0.03)  # small politeness
+    # Write back: if we got a direct link, use it; otherwise keep original (or blank)
+    out_links = []
+    it = iter(results)
+    for orig in df[url_col].astype(str):
+        take = next(it)
+        if take:            # uploaded now
+            out_links.append(take)
+        elif _is_drive_link(orig):  # already mirrored before
+            out_links.append(orig)
+        else:
+            out_links.append("")    # or orig if you’d rather preserve source URL
+    df[out_col] = out_links
 
-    df[out_col] = new_links
-    print(f"[mirror] done: {ok} uploaded, {fail} failed, {len(df)} total")
+    print(f"[mirror] done: {ok} uploaded, {fail} failed, {len(df)} total (skipped pre-mirrored + blanks)")
     return df
 
 SERVICE_ACCOUNT_EMAIL = getattr(creds, "service_account_email", None)
