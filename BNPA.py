@@ -343,7 +343,7 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 
 DRIVE_FOLDER_ID = "1CPUdz5rx6R6WY8mqHAu2XbrbggoY-m5m"  # your test folder
-FORSTA_API_KEY  = os.getenv("FORSTA_API_KEY", "").strip()  # REQUIRED (x-apikey)
+FORSTA_API_KEY  = (os.getenv("FORSTA_API_KEY") or api_key).strip()  # use env OR the api_key variable
 
 def _drive_service(creds):
     return build("drive", "v3", credentials=creds, cache_discovery=False)
