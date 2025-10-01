@@ -474,39 +474,74 @@ def _upload_image(drive, folder_id: str, name: str, blob: bytes, mime: str) -> d
     f["directLink"] = f"https://drive.google.com/uc?id={f['id']}"
     return f
 
-def mirror_df_product_images_with_uuid(df, creds, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image"):
-    if df is None or df.empty or url_col not in df.columns or uuid_col not in df.columns:
-        print("[mirror] skip: df empty or missing columns")
+import time, io, os, pandas as pd
+from googleapiclient.http import MediaIoBaseUpload
+
+def mirror_df_product_images_with_uuid(
+    df: pd.DataFrame,
+    drive,
+    folder_id: str,
+    url_col: str = "Product_Image",
+    uuid_col: str = "uuid",
+    out_col: str = "Product_Image",
+) -> pd.DataFrame:
+    """
+    For each row: fetch :img URL (using your existing _img_session / _origin_referer),
+    upload to Drive (OAuth), and write the Drive direct link back to df[out_col].
+    Keeps original URL when upload fails.
+    """
+    if df is None or df.empty:
+        print("[mirror] skip: empty df")
+        return df
+    if url_col not in df.columns or uuid_col not in df.columns:
+        print(f"[mirror] skip: missing {url_col} or {uuid_col}")
         return df
 
-    # quick visibility check
-    sample = df[url_col].dropna().astype(str).str.strip()
-    print("[mirror] sample URLs:", sample.head(3).tolist())
-    if not sample.any():
-        print("[mirror] all blank Product_Image; upstream is empty.")
-        return df
+    df = df.copy()  # avoid SettingWithCopy
+    sess = _img_session()  # your cookie-based session that worked in diag
+    ok = fail = 0
+    new_links: list[str] = []
 
-    sess = _img_session()
-    drive = _drive_service(creds)
-
-    new_links = []
-    for url, u in zip(df[url_col].astype(str).fillna(""), df[uuid_col].astype(str).fillna("")):
-        url = url.strip()
-        u   = (u.strip() or _uuidmod.uuid4().hex)
-        if not url:
-            new_links.append("")
+    for url, u in zip(df[url_col].astype(str), df[uuid_col].astype(str)):
+        url = (url or "").strip()
+        u   = (u or "").strip()
+        if not url or not u:
+            new_links.append("")  # or keep url if you prefer
             continue
+
         try:
-            blob, ctype = _fetch_image(sess, url)
-            name = f"{u}{_ext_from_mime(ctype)}"
-            info = _upload_image(drive, DRIVE_FOLDER_ID, name, blob, ctype)
-            new_links.append(info["directLink"])
-            print(f"[mirror] ok {u}")
+            # fetch image (same as your working diag)
+            ref = _origin_referer(url)
+            r = sess.get(url, headers={"Referer": ref}, timeout=30, allow_redirects=True)
+            ctype = (r.headers.get("Content-Type","").split(";",1)[0] or "").lower()
+            if r.status_code != 200 or not ctype.startswith("image/"):
+                raise RuntimeError(f":img fetch {r.status_code} {ctype}")
+
+            # upload to Drive
+            ext = (".png" if "png" in ctype else ".jpg") if ctype.startswith("image/") else ".bin"
+            safe_name = f"{u}{ext}"
+            media = MediaIoBaseUpload(io.BytesIO(r.content), mimetype=ctype, resumable=False)
+            f = drive.files().create(
+                body={"name": safe_name, "parents": [folder_id]},
+                media_body=media,
+                fields="id",
+            ).execute()
+            # make public (optional)
+            drive.permissions().create(fileId=f["id"], body={"role": "reader", "type": "anyone"}).execute()
+            direct = f"https://drive.google.com/uc?id={f['id']}"
+
+            new_links.append(direct)
+            ok += 1
         except Exception as e:
             print(f"[mirror] FAIL {u} → {e}")
-            new_links.append("")
-        time.sleep(0.05)
+            # keep original URL if you’d rather not blank it:
+            new_links.append("")  # or: new_links.append(url)
+            fail += 1
+
+        time.sleep(0.03)  # small politeness
+
     df[out_col] = new_links
+    print(f"[mirror] done: {ok} uploaded, {fail} failed, {len(df)} total")
     return df
 
 SERVICE_ACCOUNT_EMAIL = getattr(creds, "service_account_email", None)
@@ -517,9 +552,10 @@ diag_mirror_single(df_can, creds, "can", "1CPUdz5rx6R6WY8mqHAu2XbrbggoY-m5m")
 diag_mirror_single(df_usa, creds, "usa", "1CPUdz5rx6R6WY8mqHAu2XbrbggoY-m5m")
 diag_mirror_single(df_new, creds, "new", "1CPUdz5rx6R6WY8mqHAu2XbrbggoY-m5m")
 # Replace Decipher URLs with Drive links (named after df['uuid'])
-df_can = mirror_df_product_images_with_uuid(df_can, creds, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
-df_usa = mirror_df_product_images_with_uuid(df_usa, creds, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
-df_new = mirror_df_product_images_with_uuid(df_new, creds, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
+# after you’ve built drive = build_drive_service_oauth() and FOLDER_ID
+df_can = mirror_df_product_images_with_uuid(df_can, drive, FOLDER_ID, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
+df_usa = mirror_df_product_images_with_uuid(df_usa, drive, FOLDER_ID, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
+df_new = mirror_df_product_images_with_uuid(df_new, drive, FOLDER_ID, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
 
 # ---- Sheet ref: ENV > hardcoded fallback ----
 SHEET_REF = (os.environ.get("SHEET_URL") or "1U9g_BdnuCtxJar1bcbgOXsgpWpyuxqXeVM7kLnRw23I").strip().strip('"').strip("'")
