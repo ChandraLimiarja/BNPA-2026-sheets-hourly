@@ -544,9 +544,13 @@ df_new = filter_new_rows(df_new, uuids_new)
 
 # Replace Decipher URLs with Drive links (named after df['uuid'])
 # after you’ve built drive = build_drive_service_oauth() and FOLDER_ID
-df_can = mirror_df_product_images_with_uuid(df_can, drive, FOLDER_ID, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
-df_usa = mirror_df_product_images_with_uuid(df_usa, drive, FOLDER_ID, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
-df_new = mirror_df_product_images_with_uuid(df_new, drive, FOLDER_ID, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
+FOLDER_CAN = "1I2a4REOY2fNwwWm1aOXwVLubKkzjdlm7"
+FOLDER_USA = "1AMuZJhoxtZJTaMiaDNdcSqwqQuG7NzSd"
+FOLDER_NEW = "1woE_CS0oCrji3sEzQsCwItEu_fm9aQzC"
+
+df_can = mirror_df_product_images_with_uuid(df_can, drive, FOLDER_CAN, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
+df_usa = mirror_df_product_images_with_uuid(df_usa, drive, FOLDER_USA, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
+df_new = mirror_df_product_images_with_uuid(df_new, drive, FOLDER_NEW, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
 
 # ---------- helper(s) ----------
 def to_sheet_values(df: pd.DataFrame):
