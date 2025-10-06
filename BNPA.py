@@ -242,7 +242,9 @@ def transform_survey_v2(
     if "Product_Image" in out.columns and base_url:
         base = base_url.rstrip("/") + "/"
         out["Product_Image"] = out["Product_Image"].apply(
-            lambda x: (base + str(x).replace(" ", "/")) if isinstance(x, str) and x.strip() else ""
+            lambda x: (
+                base + re.sub(r"\s", "_", str(x).strip(), count=0).replace("_", "/", 1)
+            ) if isinstance(x, str) and x.strip() else ""
         )
 
     # final order
