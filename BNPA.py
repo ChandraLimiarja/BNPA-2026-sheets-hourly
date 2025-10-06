@@ -246,7 +246,7 @@ def transform_survey_v2(
             .str.replace(" ", "_")             # replace remaining spaces with "_"
         )
         out["Product_Image"] = base_url + out["Product_Image"]
-        out['Forsta_Image"] = out["Product_Image"]
+        out["Forsta_Image"] = out["Product_Image"]
 
     # final order
     if reorder_final:
