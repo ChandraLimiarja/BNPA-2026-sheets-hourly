@@ -125,6 +125,7 @@ import pandas as pd
 import numpy as np
 import requests
 import os, textwrap
+import re
 
 # ---------------- mappings, lists, etc. (from your file) ----------------
 # mapping_Q1_CAN, mapping_Q1_USA, mapping_Q2, base_url (per survey), old_cols_can/usa/new, new_cols
