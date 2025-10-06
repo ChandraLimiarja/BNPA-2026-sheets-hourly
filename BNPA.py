@@ -240,13 +240,18 @@ def transform_survey_v2(
                 out[tgt] = ""
 
     # product image URL (post-rename; expects target 'Product_Image')
-    if "Product_Image" in out.columns and base_url:
-        base = base_url.rstrip("/") + "/"
-        out["Product_Image"] = out["Product_Image"].apply(
-            lambda x: (
-                base + re.sub(r"\s", "_", str(x).strip(), count=0).replace("_", "/", 1)
-            ) if isinstance(x, str) and x.strip() else ""
-        )
+    if "Product_Image" in out.columns:
+        base = (base_url.rstrip("/") + "/") if base_url else ""
+        def _normalize_forsta_url(x: str) -> str:
+            s = str(x).strip()
+            if not s:
+                return ""
+            # if it's already a full URL, keep it
+            if s.startswith("http://") or s.startswith("https://"):
+                return s
+            # otherwise, treat as relative path under base_url
+            return (base + s.lstrip("/")) if base else s
+        out["Product_Image"] = out["Product_Image"].astype(str).map(_normalize_forsta_url)
 
     # final order
     if reorder_final:
@@ -469,7 +474,8 @@ def mirror_df_product_images_with_uuid(
     url_col: str = "Product_Image",
     uuid_col: str = "uuid",
     out_col: str = "Product_Image",
-    max_workers: int = 4,  # bump to 6–8 if your job is network-bound and stable
+    orig_col: str = "forsta_product_link",
+    max_workers: int = 4,
 ) -> pd.DataFrame:
     if df is None or df.empty:
         print("[mirror] skip: empty df")
@@ -479,64 +485,57 @@ def mirror_df_product_images_with_uuid(
         return df
 
     df = df.copy()
+    # preserve the original Forsta link
+    df[orig_col] = df[url_col].astype(str)
+
     sess = _img_session()
 
-    # Pre-filter: skip rows already mirrored, and those with blank url/uuid
-    rows = []
-    for url, u in zip(df[url_col].astype(str), df[uuid_col].astype(str)):
+    # Pre-filter rows that need work
+    jobs = []
+    for i, (url, u) in enumerate(zip(df[url_col].astype(str), df[uuid_col].astype(str))):
         url = (url or "").strip()
         u   = (u or "").strip()
         if not url or not u or _is_drive_link(url):
-            rows.append(None)  # placeholder; we’ll keep as-is/blank below
+            jobs.append(None)
         else:
-            rows.append((url, u))
+            jobs.append((i, url, u))
 
-    results = [None] * len(rows)
+    results: dict[int, str] = {}
     ok = fail = 0
 
-    # Threaded fetch+upload
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        future_idx = {}
-        for idx, job in enumerate(rows):
+        fut2idx = {}
+        for job in jobs:
             if job is None:
                 continue
-            url, u = job
+            i, url, u = job
             fut = ex.submit(_fetch_and_upload_one, url, u, folder_id, sess)
-            future_idx[fut] = idx
+            fut2idx[fut] = i
 
-        for fut in as_completed(future_idx):
-            idx = future_idx[fut]
+        for fut in as_completed(fut2idx):
+            i = fut2idx[fut]
             try:
                 direct = fut.result()
-                results[idx] = direct
+                results[i] = direct
                 ok += 1
             except Exception as e:
-                results[idx] = None
                 fail += 1
-                print(f"[mirror] FAIL idx={idx} → {e}")
+                print(f"[mirror] FAIL row={i} → {e}")
 
-    # Write back: if we got a direct link, use it; otherwise keep original (or blank)
-    out_links = []
-    it = iter(results)
-    for orig in df[url_col].astype(str):
-        take = next(it)
-        if take:            # uploaded now
-            out_links.append(take)
-        elif _is_drive_link(orig):  # already mirrored before
-            out_links.append(orig)
-        else:
-            out_links.append("")    # or orig if you’d rather preserve source URL
-    df[out_col] = out_links
+    # Write back: if uploaded, use Drive link; else keep original Forsta link
+    out_vals = df[url_col].astype(str).tolist()
+    for i, direct in results.items():
+        if direct:
+            out_vals[i] = direct
+    df[out_col] = out_vals
 
-    print(f"[mirror] done: {ok} uploaded, {fail} failed, {len(df)} total (skipped pre-mirrored + blanks)")
+    print(f"[mirror] done: {ok} uploaded, {fail} failed, {len(df)} total "
+          "(skipped pre-mirrored + blanks)")
     return df
 
 SERVICE_ACCOUNT_EMAIL = getattr(creds, "service_account_email", None)
 print("[diag] SA email:", SERVICE_ACCOUNT_EMAIL or "<unknown>")
 print("[diag] DRIVE_FOLDER_ID:", os.getenv("DRIVE_FOLDER_ID", "1CPUdz5rx6R6WY8mqHAu2XbrbggoY-m5m"))
-
-drive = build_drive_service_oauth()
-FOLDER_ID = os.getenv("UPLOAD_FOLDER_ID", "1CPUdz5rx6R6WY8mqHAu2XbrbggoY-m5m")
 
 # ---- Sheet ref: ENV > hardcoded fallback ----
 SHEET_REF = (os.environ.get("SHEET_URL") or "1U9g_BdnuCtxJar1bcbgOXsgpWpyuxqXeVM7kLnRw23I").strip().strip('"').strip("'")
@@ -581,11 +580,16 @@ df_can = filter_new_rows(df_can, uuids_can)
 df_usa = filter_new_rows(df_usa, uuids_usa)
 df_new = filter_new_rows(df_new, uuids_new)
 
+drive = build_drive_service_oauth()
+FOLDER_ID = os.getenv("UPLOAD_FOLDER_ID", "1CPUdz5rx6R6WY8mqHAu2XbrbggoY-m5m")
+
 # Replace Decipher URLs with Drive links (named after df['uuid'])
 # after you’ve built drive = build_drive_service_oauth() and FOLDER_ID
 df_can = mirror_df_product_images_with_uuid(df_can, drive, FOLDER_ID, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
 df_usa = mirror_df_product_images_with_uuid(df_usa, drive, FOLDER_ID, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
 df_new = mirror_df_product_images_with_uuid(df_new, drive, FOLDER_ID, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
+
+print("[post-mirror] can:", df_can[["uuid","forsta_product_link","Product_Image"]].head(3).to_dict("records"))
 
 # ---------- helper(s) ----------
 def to_sheet_values(df: pd.DataFrame):
