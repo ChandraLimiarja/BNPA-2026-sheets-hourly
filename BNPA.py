@@ -611,6 +611,12 @@ def write_new_rows_by_key(sh, tab_name: str, df: pd.DataFrame, key_col="uuid", c
         ws.update("A1", [df_to_write.columns.tolist()] + to_sheet_values(df_to_write),
                   value_input_option="USER_ENTERED")
         return len(df_to_write)
+    else:
+        # NEW: extend headers if DF has extra columns (e.g., Forsta_Image)
+        extras = [c for c in df.columns if c not in headers]
+        if extras:
+            headers = headers + extras
+            ws.update("A1", [headers])  # update header row to include new columns
 
     # align df to existing headers (add missing as blank; drop extras)
     for col in headers:
