@@ -125,7 +125,6 @@ import pandas as pd
 import numpy as np
 import requests
 import os, textwrap
-import re
 
 # ---------------- mappings, lists, etc. (from your file) ----------------
 # mapping_Q1_CAN, mapping_Q1_USA, mapping_Q2, base_url (per survey), old_cols_can/usa/new, new_cols
@@ -190,6 +189,7 @@ def transform_survey_v2(
     if df.empty:
         print("DataFrame is empty — skipping downstream steps")
         return df
+
     out = df.copy()
 
     # make sure "Other" helper exists if needed
@@ -238,15 +238,15 @@ def transform_survey_v2(
             if tgt not in out.columns:
                 out[tgt] = ""
 
-    # Product image URL (post-rename). Keep existing full URLs; normalize Forsta blobs.
-    if "Product_Image" in out.columns:
+    # product image URL (post-rename; expects target 'Product_Image')
+    if "Product_Image" in out.columns and base_url:
         out["Product_Image"] = (
             out["Product_Image"]
             .str.replace(" ", "/", n=1)        # replace first space with "/"
             .str.replace(" ", "_")             # replace remaining spaces with "_"
         )
         out["Product_Image"] = base_url + out["Product_Image"]
-        out["forsta_product_link"] = out["Product_Image"]
+        out['Forsta_Image"] = out["Product_Image"]
 
     # final order
     if reorder_final:
@@ -389,6 +389,7 @@ def _img_session() -> requests.Session:
 
 import time, io, os, pandas as pd
 from googleapiclient.http import MediaIoBaseUpload
+
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import itertools
 
@@ -424,110 +425,79 @@ def _fetch_and_upload_one(url: str, u: str, folder_id: str, cookie_sess: request
 
 def mirror_df_product_images_with_uuid(
     df: pd.DataFrame,
-    drive,
+    drive,                 # kept for signature compatibility; not used by workers
     folder_id: str,
     url_col: str = "Product_Image",
     uuid_col: str = "uuid",
     out_col: str = "Product_Image",
-    orig_col: str = "forsta_product_link",
-    max_workers: int = 4,
+    max_workers: int = 4,  # bump to 6–8 if your job is network-bound and stable
 ) -> pd.DataFrame:
-    # Handle empty / missing columns gracefully and still add orig_col if possible
     if df is None or df.empty:
         print("[mirror] skip: empty df")
         return df
     if url_col not in df.columns or uuid_col not in df.columns:
         print(f"[mirror] skip: missing {url_col} or {uuid_col}")
-        # still add orig_col if url_col exists (it doesn't), so just return
         return df
 
     df = df.copy()
-
-    # 1) Preserve original Forsta link column ALWAYS
-    df[orig_col] = df[url_col].astype(str)
-
-    # 2) If we have no cookie, don’t try to fetch; keep Product_Image as original
-    cookie_present = bool(os.getenv("FORSTA_COOKIE", "").strip())
-    if not cookie_present:
-        print("[mirror] FORSTA_COOKIE empty; leaving Product_Image as original Forsta links.")
-        return df
-
-    # 3) Build one session for this batch
     sess = _img_session()
 
-    # 4) Pre-filter rows that need work (non-empty, non-drive links)
-    def _is_drive_link(x: str) -> bool:
-        x = (x or "").lower()
-        return ("drive.google.com/uc?id=" in x) or ("drive.google.com/open?id=" in x)
-
-    jobs = []
-    for i, (url, u) in enumerate(zip(df[url_col].astype(str), df[uuid_col].astype(str))):
+    # Pre-filter: skip rows already mirrored, and those with blank url/uuid
+    rows = []
+    for url, u in zip(df[url_col].astype(str), df[uuid_col].astype(str)):
         url = (url or "").strip()
         u   = (u or "").strip()
         if not url or not u or _is_drive_link(url):
-            # keep original value; no job
-            jobs.append(None)
+            rows.append(None)  # placeholder; we’ll keep as-is/blank below
         else:
-            jobs.append((i, url, u))
+            rows.append((url, u))
 
-    if not any(j is not None for j in jobs):
-        print("[mirror] nothing to mirror (all blank or already drive links).")
-        return df
-
-    # 5) Worker that fetches + uploads one row, returns Drive link
-    def _fetch_and_upload_one(url: str, u: str) -> str:
-        ref = _origin_referer(url)
-        r = sess.get(url, headers={"Referer": ref}, timeout=30, allow_redirects=True)
-        ctype = (r.headers.get("Content-Type","").split(";",1)[0] or "").lower()
-        if r.status_code != 200 or not ctype.startswith("image/"):
-            # Surface the first bytes to help identify login HTML if needed
-            raise RuntimeError(f":img fetch {r.status_code} {ctype}")
-        ext = (".png" if "png" in ctype else ".jpg") if ctype.startswith("image/") else ".bin"
-        safe_name = f"{u}{ext}"
-        media = MediaIoBaseUpload(io.BytesIO(r.content), mimetype=ctype, resumable=False)
-        # Use your OAuth drive (built outside) and rely on folder-level link-sharing
-        f = drive.files().create(
-            body={"name": safe_name, "parents": [folder_id]},
-            media_body=media,
-            fields="id",
-        ).execute()
-        return f"https://drive.google.com/uc?id={f['id']}"
-
-    # 6) Run (optionally threaded) and write back: on failure, keep original Forsta URL
+    results = [None] * len(rows)
     ok = fail = 0
-    results: dict[int, str] = {}
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    # Threaded fetch+upload
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        fut2idx = {}
-        for job in jobs:
+        future_idx = {}
+        for idx, job in enumerate(rows):
             if job is None:
                 continue
-            i, url, u = job
-            fut = ex.submit(_fetch_and_upload_one, url, u)
-            fut2idx[fut] = i
+            url, u = job
+            fut = ex.submit(_fetch_and_upload_one, url, u, folder_id, sess)
+            future_idx[fut] = idx
 
-        for fut in as_completed(fut2idx):
-            i = fut2idx[fut]
+        for fut in as_completed(future_idx):
+            idx = future_idx[fut]
             try:
-                results[i] = fut.result()
+                direct = fut.result()
+                results[idx] = direct
                 ok += 1
             except Exception as e:
+                results[idx] = None
                 fail += 1
-                print(f"[mirror] FAIL row={i} → {e}")
+                print(f"[mirror] FAIL idx={idx} → {e}")
 
-    # 7) Apply Drive links only where we succeeded; else keep original Forsta URL
-    out_vals = df[url_col].astype(str).tolist()
-    for i, direct in results.items():
-        if direct:
-            out_vals[i] = direct
-    df[out_col] = out_vals
+    # Write back: if we got a direct link, use it; otherwise keep original (or blank)
+    out_links = []
+    it = iter(results)
+    for orig in df[url_col].astype(str):
+        take = next(it)
+        if take:            # uploaded now
+            out_links.append(take)
+        elif _is_drive_link(orig):  # already mirrored before
+            out_links.append(orig)
+        else:
+            out_links.append("")    # or orig if you’d rather preserve source URL
+    df[out_col] = out_links
 
-    print(f"[mirror] done: {ok} uploaded, {fail} failed, {len(df)} total (kept Forsta links on failures)")
+    print(f"[mirror] done: {ok} uploaded, {fail} failed, {len(df)} total (skipped pre-mirrored + blanks)")
     return df
 
 SERVICE_ACCOUNT_EMAIL = getattr(creds, "service_account_email", None)
 print("[diag] SA email:", SERVICE_ACCOUNT_EMAIL or "<unknown>")
 print("[diag] DRIVE_FOLDER_ID:", os.getenv("DRIVE_FOLDER_ID", "1CPUdz5rx6R6WY8mqHAu2XbrbggoY-m5m"))
+
+drive = build_drive_service_oauth()
+FOLDER_ID = os.getenv("UPLOAD_FOLDER_ID", "1CPUdz5rx6R6WY8mqHAu2XbrbggoY-m5m")
 
 # ---- Sheet ref: ENV > hardcoded fallback ----
 SHEET_REF = (os.environ.get("SHEET_URL") or "1U9g_BdnuCtxJar1bcbgOXsgpWpyuxqXeVM7kLnRw23I").strip().strip('"').strip("'")
@@ -572,29 +542,11 @@ df_can = filter_new_rows(df_can, uuids_can)
 df_usa = filter_new_rows(df_usa, uuids_usa)
 df_new = filter_new_rows(df_new, uuids_new)
 
-drive = build_drive_service_oauth()
-FOLDER_ID = os.getenv("UPLOAD_FOLDER_ID", "1CPUdz5rx6R6WY8mqHAu2XbrbggoY-m5m")
-
 # Replace Decipher URLs with Drive links (named after df['uuid'])
 # after you’ve built drive = build_drive_service_oauth() and FOLDER_ID
 df_can = mirror_df_product_images_with_uuid(df_can, drive, FOLDER_ID, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
 df_usa = mirror_df_product_images_with_uuid(df_usa, drive, FOLDER_ID, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
 df_new = mirror_df_product_images_with_uuid(df_new, drive, FOLDER_ID, url_col="Product_Image", uuid_col="uuid", out_col="Product_Image")
-
-print("[post-mirror] can:", df_can[["uuid","forsta_product_link","Product_Image"]].head(3).to_dict("records"))
-def print_samples(label, df):
-    if df is None or df.empty:
-        print(f"[post-mirror:{label}] empty df")
-        return
-    cols = [c for c in ["uuid","forsta_product_link","Product_Image"] if c in df.columns]
-    if not cols:
-        print(f"[post-mirror:{label}] required columns not present")
-        return
-    print(f"[post-mirror:{label}] samples:", df[cols].head(3).to_dict("records"))
-
-print_samples("can", df_can)
-print_samples("usa", df_usa)
-print_samples("new", df_new)
 
 # ---------- helper(s) ----------
 def to_sheet_values(df: pd.DataFrame):
