@@ -171,30 +171,6 @@ def fetch_survey_df(client_id: str, survey_id: str, api_key: str, fmt: str = "js
     df = df.apply(clean_cast_column)
     return df
 
-def normalize_forsta_blob(url: str) -> str:
-    """
-    For Forsta :img/blob/ URLs:
-      - replace the FIRST space after ':img/blob/' with '/'
-      - replace ALL remaining spaces after that with '_'
-    Leaves non-matching URLs unchanged.
-    """
-    s = str(url or "").strip()
-    key = ":img/blob/"
-    if not s or key not in s:
-        return s
-    head, _, tail = s.partition(key)  # tail = "<part with spaces>"
-    # split tail on the FIRST space
-    if " " in tail:
-        left, right = tail.split(" ", 1)
-        # any residual spaces become underscores
-        left_fixed  = left.replace(" ", "_")
-        right_fixed = right.replace(" ", "_")
-        tail_fixed  = f"{left_fixed}/{right_fixed}"
-    else:
-        # no spaces after :img/blob/ → nothing special to do
-        tail_fixed = tail.replace(" ", "_")
-    return head + key + tail_fixed
-
 # ---------------- main transform (v2, fixed) ----------------
 def transform_survey_v2(
     df: pd.DataFrame,
@@ -214,7 +190,6 @@ def transform_survey_v2(
     if df.empty:
         print("DataFrame is empty — skipping downstream steps")
         return df
-
     out = df.copy()
 
     # make sure "Other" helper exists if needed
@@ -265,8 +240,12 @@ def transform_survey_v2(
 
     # Product image URL (post-rename). Keep existing full URLs; normalize Forsta blobs.
     if "Product_Image" in out.columns:
-        out["Product_Image"] = out["Product_Image"].astype(str).map(normalize_forsta_blob)
-        # also persist the original Forsta link for the sheet (even if mirroring is skipped)
+        out["Product_Image"] = (
+            out["Product_Image"]
+            .str.replace(" ", "/", n=1)        # replace first space with "/"
+            .str.replace(" ", "_")             # replace remaining spaces with "_"
+        )
+        out["Product_Image"] = base_url + out["Product_Image"]
         out["forsta_product_link"] = out["Product_Image"]
 
     # final order
