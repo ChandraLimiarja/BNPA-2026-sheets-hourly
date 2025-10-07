@@ -421,7 +421,7 @@ def _build_drive_service_oauth_worker():
     # Create a fresh Drive client for each worker (googleapiclient isn’t thread-safe).
     return build_drive_service_oauth()
 
-def _fetch_and_upload_one(url: str, u: str, folder_id: str, cookie_sess: requests.Session) -> str | None:
+def _fetch_and_upload_one(url: str, u: str, prod_name: str, folder_id: str, cookie_sess: requests.Session) -> str | None:
     # 1) fetch
     ref = _origin_referer(url)
     r = cookie_sess.get(url, headers={"Referer": ref}, timeout=30, allow_redirects=True)
@@ -479,13 +479,27 @@ def mirror_df_product_images_with_uuid(
     ok = fail = 0
 
     # Threaded fetch+upload
+
+    jobs = []
+    for i, (url, u, pn) in enumerate(zip(
+            df[url_col].astype(str),
+            df[uuid_col].astype(str),
+            df.get("Product_Name", pd.Series([""]*len(df))).astype(str)  # <-- adjust column name if different
+        )):
+        url = (url or "").strip()
+        u   = (u or "").strip()
+        pn  = (pn or "").strip()
+        if not url or not u or _is_drive_link(url):
+            continue
+        jobs.append((i, url, u, pn))
+            
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         future_idx = {}
         for idx, job in enumerate(rows):
             if job is None:
                 continue
             url, u = job
-            fut = ex.submit(_fetch_and_upload_one, url, u, folder_id, sess)
+            fut = ex.submit(_fetch_and_upload_one, url, u, pn, folder_id, sess)
             future_idx[fut] = idx
 
         for fut in as_completed(future_idx):
