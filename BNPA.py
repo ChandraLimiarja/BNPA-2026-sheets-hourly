@@ -353,6 +353,25 @@ import os
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
+import re
+
+def _slugify_for_drive(name: str, max_len: int = 140) -> str:
+    """
+    Make a safe filename chunk for Google Drive:
+    - keep letters/numbers/space/-/_
+    - collapse whitespace to single '-'
+    - strip leading/trailing dashes/underscores
+    - cap length
+    """
+    s = (name or "").strip()
+    s = re.sub(r"[^\w\s\-]", "", s, flags=re.UNICODE)   # remove weird chars
+    s = re.sub(r"\s+", "-", s)                          # spaces -> single dash
+    s = re.sub(r"-{2,}", "-", s)                        # collapse multiple dashes
+    s = s.strip("-_")
+    if len(s) > max_len:
+        s = s[:max_len].rstrip("-_")
+    return s
+
 def build_drive_service_oauth():
     scopes = ["https://www.googleapis.com/auth/drive.file"]
     creds = Credentials(
@@ -413,7 +432,10 @@ def _fetch_and_upload_one(url: str, u: str, folder_id: str, cookie_sess: request
     # 2) upload (fresh Drive client per thread)
     drive_local = _build_drive_service_oauth_worker()
     ext = (".png" if "png" in ctype else ".jpg") if ctype.startswith("image/") else ".bin"
-    safe_name = f"{u}{ext}"
+    # Pull product name from the DF row; pass it into the job alongside uuid/url
+    prod = (prod_name or "").strip()
+    slug = _slugify_for_drive(prod)
+    safe_name = f"{u}-{slug}{ext}" if slug else f"{u}{ext}"
     media = MediaIoBaseUpload(io.BytesIO(r.content), mimetype=ctype, resumable=False)
     f = drive_local.files().create(
         body={"name": safe_name, "parents": [folder_id]},
