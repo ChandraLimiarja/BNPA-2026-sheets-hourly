@@ -421,29 +421,23 @@ def _build_drive_service_oauth_worker():
     # Create a fresh Drive client for each worker (googleapiclient isn’t thread-safe).
     return build_drive_service_oauth()
 
-def _fetch_and_upload_one(url: str, u: str, prod_name: str, folder_id: str, cookie_sess: requests.Session) -> str | None:
-    # 1) fetch
+def _fetch_and_upload_one(url: str, u: str, prod_name: str, folder_id: str, cookie_sess: requests.Session) -> str:
     ref = _origin_referer(url)
     r = cookie_sess.get(url, headers={"Referer": ref}, timeout=30, allow_redirects=True)
     ctype = (r.headers.get("Content-Type","").split(";",1)[0] or "").lower()
     if r.status_code != 200 or not ctype.startswith("image/"):
         raise RuntimeError(f":img fetch {r.status_code} {ctype}")
 
-    # 2) upload (fresh Drive client per thread)
-    drive_local = _build_drive_service_oauth_worker()
-    ext = (".png" if "png" in ctype else ".jpg") if ctype.startswith("image/") else ".bin"
-    # Pull product name from the DF row; pass it into the job alongside uuid/url
-    prod = (prod_name or "").strip()
-    slug = _slugify_for_drive(prod)
+    ext  = ".png" if "png" in ctype else (".jpg" if "jpeg" in ctype or "jpg" in ctype else ".bin")
+    slug = _slugify_for_drive(prod_name)
     safe_name = f"{u}-{slug}{ext}" if slug else f"{u}{ext}"
+
     media = MediaIoBaseUpload(io.BytesIO(r.content), mimetype=ctype, resumable=False)
-    f = drive_local.files().create(
+    f = build_drive_service_oauth().files().create(  # one Drive client per worker
         body={"name": safe_name, "parents": [folder_id]},
         media_body=media,
         fields="id",
     ).execute()
-
-    # IMPORTANT: no per-file permissions call — rely on folder-level link sharing.
     return f"https://drive.google.com/uc?id={f['id']}"
 
 def mirror_df_product_images_with_uuid(
@@ -477,11 +471,12 @@ def mirror_df_product_images_with_uuid(
     ok = fail = 0
 
     # Threaded fetch+upload
+    # build job list (skip blanks / already-mirrored)
     jobs = []
     for i, (url, u, pn) in enumerate(zip(
             df[url_col].astype(str),
             df[uuid_col].astype(str),
-            df.get("Product_Name", pd.Series([""]*len(df))).astype(str)  # <-- adjust column name if different
+            df.get("Product_Name", pd.Series([""]*len(df))).astype(str)  # adjust column if named differently
         )):
         url = (url or "").strip()
         u   = (u or "").strip()
@@ -489,7 +484,14 @@ def mirror_df_product_images_with_uuid(
         if not url or not u or _is_drive_link(url):
             continue
         jobs.append((i, url, u, pn))
-            
+    
+    if not jobs:
+        print("[mirror] nothing to mirror (all blank, pre-mirrored, or already in sheet).")
+        return df
+    
+    ok = fail = 0
+    results: dict[int, str] = {}  # <-- define results before the thread loop
+    
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         future_idx = {}
         for (i, url, u, pn) in jobs:
@@ -503,26 +505,20 @@ def mirror_df_product_images_with_uuid(
                 results[i] = direct
                 ok += 1
             except Exception as e:
-                results[i] = None
+                results[i] = None     # <-- no NameError now
                 fail += 1
                 print(f"[mirror] FAIL idx={i} → {e}")
-
-
-    # Write back: if we got a direct link, use it; otherwise keep original (or blank)
-    out_links = []
-    it = iter(results)
-    for orig in df[url_col].astype(str):
-        take = next(it)
-        if take:            # uploaded now
-            out_links.append(take)
-        elif _is_drive_link(orig):  # already mirrored before
-            out_links.append(orig)
-        else:
-            out_links.append("")    # or orig if you’d rather preserve source URL
+    
+    # write back: keep Forsta on failures; overwrite only where we uploaded
+    out_links = df[url_col].astype(str).tolist()
+    for i, direct in results.items():
+        if direct:
+            out_links[i] = direct
     df[out_col] = out_links
-
-    print(f"[mirror] done: {ok} uploaded, {fail} failed, {len(df)} total (skipped pre-mirrored + blanks)")
+    
+    print(f"[mirror] done: {ok} uploaded, {fail} failed, {len(df)} total (kept Forsta links on failures)")
     return df
+
 
 SERVICE_ACCOUNT_EMAIL = getattr(creds, "service_account_email", None)
 print("[diag] SA email:", SERVICE_ACCOUNT_EMAIL or "<unknown>")
