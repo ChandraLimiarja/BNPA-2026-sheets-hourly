@@ -474,12 +474,9 @@ def mirror_df_product_images_with_uuid(
             rows.append(None)  # placeholder; we’ll keep as-is/blank below
         else:
             rows.append((url, u))
-
-    results = [None] * len(rows)
     ok = fail = 0
 
     # Threaded fetch+upload
-
     jobs = []
     for i, (url, u, pn) in enumerate(zip(
             df[url_col].astype(str),
@@ -495,23 +492,21 @@ def mirror_df_product_images_with_uuid(
             
     with ThreadPoolExecutor(max_workers=max_workers) as ex:
         future_idx = {}
-        for idx, job in enumerate(rows):
-            if job is None:
-                continue
-            url, u = job
+        for (i, url, u, pn) in jobs:
             fut = ex.submit(_fetch_and_upload_one, url, u, pn, folder_id, sess)
-            future_idx[fut] = idx
-
+            future_idx[fut] = i
+    
         for fut in as_completed(future_idx):
-            idx = future_idx[fut]
+            i = future_idx[fut]
             try:
                 direct = fut.result()
-                results[idx] = direct
+                results[i] = direct
                 ok += 1
             except Exception as e:
-                results[idx] = None
+                results[i] = None
                 fail += 1
-                print(f"[mirror] FAIL idx={idx} → {e}")
+                print(f"[mirror] FAIL idx={i} → {e}")
+
 
     # Write back: if we got a direct link, use it; otherwise keep original (or blank)
     out_links = []
