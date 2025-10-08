@@ -48,6 +48,10 @@ jobs:
       # --- Login and fetch cookie ---
       - name: Get Forsta cookie
         id: cookie
+        env:
+          FORSTA_USER: ${{ secrets.FORSTA_USER }}
+          FORSTA_PASS: ${{ secrets.FORSTA_PASS }}
+          FORSTA_LOGIN_URL: ${{ secrets.FORSTA_LOGIN_URL }} # optional override
         run: |
           python fetch_forsta_cookie.py
           base64 -w0 forsta_cookie.txt > cookie.b64
