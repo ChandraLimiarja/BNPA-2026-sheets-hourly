@@ -48,12 +48,10 @@ jobs:
       # --- Login and fetch cookie ---
       - name: Get Forsta cookie
         id: cookie
-        env:
-          FORSTA_USER: ${{ secrets.FORSTA_USER }}
-          FORSTA_PASS: ${{ secrets.FORSTA_PASS }}
-          # Omit FORSTA_LOGIN_URL unless you truly need to override
-        run: python fetch_forsta_cookie.py
-
+        run: |
+          python fetch_forsta_cookie.py
+          base64 -w0 forsta_cookie.txt > cookie.b64
+          echo "FORSTA_COOKIE_B64=$(cat cookie.b64)" >> "$GITHUB_OUTPUT"
 
       # Optional: keep a copy as an artifact for debugging
       - name: Upload cookie artifact (optional)
@@ -76,11 +74,17 @@ jobs:
           # >>> Toggle ONE of these lines <<<
 
           # Use fetched cookie:
-          # FORSTA_COOKIE: ${{ steps.cookie.outputs.FORSTA_COOKIE }}
-
+          FORSTA_COOKIE_B64: ${{ steps.cookie.outputs.FORSTA_COOKIE_B64 }}
+          
           # Use manual cookie (GitHub secret):
-          FORSTA_COOKIE: ${{ secrets.FORSTA_COOKIE }}
+          # FORSTA_COOKIE: ${{ secrets.FORSTA_COOKIE }}
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
+          # decode if using fetched cookie
+          if [ -n "${FORSTA_COOKIE_B64:-}" ]; then
+            export FORSTA_COOKIE="$(printf %s "$FORSTA_COOKIE_B64" | base64 -d)"
+          fi
+          python BNPA.py
+          
           python BNPA.py
