@@ -78,8 +78,6 @@ jobs:
           # Use manual cookie (GitHub secret):
           # FORSTA_COOKIE: ${{ secrets.FORSTA_COOKIE }}
         run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
           # decode if using fetched cookie
           if [ -n "${FORSTA_COOKIE_B64:-}" ]; then
             export FORSTA_COOKIE="$(printf %s "$FORSTA_COOKIE_B64" | base64 -d)"
