@@ -2,7 +2,7 @@
 import os, sys, base64, json, time
 from playwright.sync_api import sync_playwright
 
-LOGIN_URL = os.environ.get("FORSTA_LOGIN_URL", "https://sw2.decipherinc.com/login/")
+LOGIN_URL = os.environ.get("FORSTA_LOGIN_URL") or "https://sw2.decipherinc.com/login/"
 USERNAME  = os.environ["FORSTA_USER"]
 PASSWORD  = os.environ["FORSTA_PASS"]
 
@@ -27,9 +27,11 @@ def main():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         ctx = browser.new_context()
+        ctx.add_cookies([{
+            "name": "DECIPHER_POLICY", "value": "1",
+            "domain": "sw2.decipherinc.com", "path": "/"
+        }])
         page = ctx.new_page()
-
-        # Go to login
         page.goto(LOGIN_URL, wait_until="domcontentloaded")
 
         # Accept cookie banner if present
