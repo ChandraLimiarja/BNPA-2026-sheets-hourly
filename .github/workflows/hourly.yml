@@ -76,10 +76,10 @@ jobs:
           # >>> Toggle ONE of these lines <<<
 
           # Use fetched cookie:
-          FORSTA_COOKIE: ${{ steps.cookie.outputs.FORSTA_COOKIE }}
+          # FORSTA_COOKIE: ${{ steps.cookie.outputs.FORSTA_COOKIE }}
 
           # Use manual cookie (GitHub secret):
-          # FORSTA_COOKIE: ${{ secrets.FORSTA_COOKIE }}
+          FORSTA_COOKIE: ${{ secrets.FORSTA_COOKIE }}
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
