@@ -1,5 +1,7 @@
+pillow
 pandas
 gspread
 google-auth
 gspread-dataframe
 google-api-python-client
+
