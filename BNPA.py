@@ -326,45 +326,6 @@ df_can = clean_dfs["can"]
 df_usa = clean_dfs["usa"]
 df_new = clean_dfs["new"]
 
-# PATCH FOR WEBP
-from PIL import Image
-import io
-
-# Turn this on if you want Drive links that render inline everywhere
-CONVERT_WEBP_TO_PNG = True
-
-def _bytes_to_image_and_mime(blob: bytes) -> tuple[bytes, str, str]:
-    """
-    Sniff image bytes with Pillow regardless of HTTP headers.
-    Returns (image_bytes, mime, ext) where:
-      - mime = e.g., 'image/png'
-      - ext  = e.g., '.png'
-    If CONVERT_WEBP_TO_PNG is True, WEBP is converted to PNG.
-    """
-    im = Image.open(io.BytesIO(blob))
-    fmt = (im.format or "").upper()  # 'PNG', 'JPEG', 'WEBP', etc.
-
-    if fmt == "WEBP" and CONVERT_WEBP_TO_PNG:
-        out = io.BytesIO()
-        im.convert("RGBA").save(out, format="PNG")
-        return out.getvalue(), "image/png", ".png"
-
-    # Keep original format
-    if fmt == "PNG":
-        return blob, "image/png", ".png"
-    if fmt in ("JPG", "JPEG"):
-        return blob, "image/jpeg", ".jpg"
-    if fmt == "GIF":
-        return blob, "image/gif", ".gif"
-    if fmt == "WEBP":
-        return blob, "image/webp", ".webp"
-
-    # Fallback to PNG if it's some less common format Pillow can read
-    out = io.BytesIO()
-    im.convert("RGBA").save(out, format="PNG")
-    return out.getvalue(), "image/png", ".png"
-
-
 # --- 0) Auth + setup  ---
 import os, re, json, pandas as pd, numpy as np, gspread
 from google.oauth2.service_account import Credentials
@@ -463,17 +424,11 @@ def _build_drive_service_oauth_worker():
 def _fetch_and_upload_one(url: str, u: str, prod_name: str, folder_id: str, cookie_sess: requests.Session) -> str:
     ref = _origin_referer(url)
     r = cookie_sess.get(url, headers={"Referer": ref}, timeout=30, allow_redirects=True)
-    # ctype = (r.headers.get("Content-Type","").split(";",1)[0] or "").lower()
+    ctype = (r.headers.get("Content-Type","").split(";",1)[0] or "").lower()
     if r.status_code != 200 or not ctype.startswith("image/"):
         raise RuntimeError(f":img fetch {r.status_code} {ctype}")
 
-    try:
-        img_bytes, mime, ext = _bytes_to_image_and_mime(r.content)
-    except Exception as e:
-        # This really isn’t an image (or the cookie expired)
-        raise RuntimeError(f"not image bytes (maybe login/HTML) → {e}")
-    
-    # ext  = ".png" if "png" in ctype else (".jpg" if "jpeg" in ctype or "jpg" in ctype else ".bin")
+    ext  = ".png" if "png" in ctype else (".jpg" if "jpeg" in ctype or "jpg" in ctype else ".bin")
     slug = _slugify_for_drive(prod_name)
     safe_name = f"{u}-{slug}{ext}" if slug else f"{u}{ext}"
 
