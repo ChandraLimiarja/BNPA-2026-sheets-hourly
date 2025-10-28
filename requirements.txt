@@ -4,5 +4,7 @@ gspread
 google-auth
 gspread-dataframe
 google-api-python-client
+packaging>=21.3
+
 
 
