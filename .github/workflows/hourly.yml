@@ -13,25 +13,22 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
-    container: mcr.microsoft.com/playwright:v1.55.0-noble  # has Chromium + deps
+    container: mcr.microsoft.com/playwright:v1.56.0-noble   # ⬅ bump to 1.56.0
     env:
       PIP_CACHE_DIR: /tmp/pip-cache
-      USE_FETCHED_COOKIE: true  # flip to false to skip Playwright steps
+      USE_FETCHED_COOKIE: true
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # Cache pip in a writable dir
       - name: Cache pip
         uses: actions/cache@v4
         with:
           path: /tmp/pip-cache
           key: pip-${{ runner.os }}-py311-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-            pip-${{ runner.os }}-py311-
+          restore-keys: pip-${{ runner.os }}-py311-
 
       - name: Install Python deps
         run: |
@@ -39,7 +36,7 @@ jobs:
           python -m pip install -r requirements.txt
           # playwright Python module only; browsers already in the image
           if [ "${USE_FETCHED_COOKIE}" = "true" ]; then
-            python -m pip install playwright
+            python -m pip install "playwright==1.56.0"   # ⬅ pin to container version
           fi
       # --- Login and fetch cookie ---
       - name: Get Forsta cookie
