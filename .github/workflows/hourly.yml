@@ -58,7 +58,14 @@ jobs:
           name: forsta-cookie
           path: forsta_cookie.txt
           retention-days: 1
-
+      # Optional: upload CSV snapshots for debugging the writes
+      - name: Upload New & Noteworthy CSV snapshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: new-and-noteworthy-new-rows
+          path: new_and_noteworthy_new_rows_*.csv
+          retention-days: 1
       # --- Run BNPA script (no extra job nesting) ---
       - name: Run BNPA
         env:
