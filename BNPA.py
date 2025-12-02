@@ -748,7 +748,15 @@ try:
 except Exception as e:
     print(f"[debug] Failed to save CSV snapshot: {e}")
 
-print("[diag] SHEET URL (from API):", sh.url)
-ws = sh.worksheet("New & Noteworthy")
-print("[diag] TAB TITLE (from API):", ws.title)
+try:
+    ws_test = sh.worksheet("New & Noteworthy")
+    import random, string
+    gib = "TEST_" + "".join(random.choices(string.ascii_letters + string.digits, k=8))
 
+    # Write a simple one-cell row: only column A filled
+    ws_test.append_row([gib], value_input_option="USER_ENTERED")
+
+    print(f"[WRITE TEST] Successfully attempted to append: {gib}")
+
+except Exception as e:
+    print(f"[WRITE TEST ERROR] {e}")
