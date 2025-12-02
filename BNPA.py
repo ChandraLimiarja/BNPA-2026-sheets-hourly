@@ -748,3 +748,7 @@ try:
 except Exception as e:
     print(f"[debug] Failed to save CSV snapshot: {e}")
 
+print("[diag] SHEET URL (from API):", sh.url)
+ws = sh.worksheet("New & Noteworthy")
+print("[diag] TAB TITLE (from API):", ws.title)
+
