@@ -734,29 +734,30 @@ except Exception as e:
 
 print(" | ".join(results))
 
-from datetime import datetime
+# DEBUGGING
+# from datetime import datetime
 
 # Save the would-be new rows for New & Noteworthy as a CSV snapshot
-try:
-    if df_new is not None and not df_new.empty:
-        ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        csv_name = f"new_and_noteworthy_new_rows_{ts}.csv"
-        df_new.to_csv(csv_name, index=False, encoding="utf-8-sig")
-        print(f"[debug] Saved CSV snapshot for New & Noteworthy: {csv_name}")
-    else:
-        print("[debug] No df_new rows to snapshot.")
-except Exception as e:
-    print(f"[debug] Failed to save CSV snapshot: {e}")
+# try:
+#     if df_new is not None and not df_new.empty:
+#         ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+#         csv_name = f"new_and_noteworthy_new_rows_{ts}.csv"
+#         df_new.to_csv(csv_name, index=False, encoding="utf-8-sig")
+#         print(f"[debug] Saved CSV snapshot for New & Noteworthy: {csv_name}")
+#     else:
+#         print("[debug] No df_new rows to snapshot.")
+# except Exception as e:
+#     print(f"[debug] Failed to save CSV snapshot: {e}")
 
-try:
-    ws_test = sh.worksheet("New & Noteworthy")
-    import random, string
-    gib = "TEST_" + "".join(random.choices(string.ascii_letters + string.digits, k=8))
+# try:
+#     ws_test = sh.worksheet("New & Noteworthy")
+#     import random, string
+#     gib = "TEST_" + "".join(random.choices(string.ascii_letters + string.digits, k=8))
 
-    # Write a simple one-cell row: only column A filled
-    ws_test.append_row([gib], value_input_option="USER_ENTERED")
+#     # Write a simple one-cell row: only column A filled
+#     ws_test.append_row([gib], value_input_option="USER_ENTERED")
 
-    print(f"[WRITE TEST] Successfully attempted to append: {gib}")
+#     print(f"[WRITE TEST] Successfully attempted to append: {gib}")
 
-except Exception as e:
-    print(f"[WRITE TEST ERROR] {e}")
+# except Exception as e:
+#     print(f"[WRITE TEST ERROR] {e}")
