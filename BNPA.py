@@ -288,7 +288,8 @@ def run_all_surveys(client_id: str, api_key: str, surveys: list):
 surveys = [
     {
         "name": "can",
-        "id": "250910",
+        # "id": "250910", #2026
+        "id": "251115", #2027
         "old_cols": old_cols_can,
         "new_cols": new_cols,
         "map_q1": mapping_Q1_CAN,
@@ -298,7 +299,8 @@ surveys = [
     },
     {
         "name": "usa",
-        "id": "250914",
+        # "id": "250914", #2026
+        "id": "251201", #2027
         "old_cols": old_cols_usa,
         "new_cols": new_cols,
         "map_q1": mapping_Q1_USA,
@@ -715,13 +717,13 @@ def write_new_rows_by_key(sh, tab_name: str, df: pd.DataFrame, key_col="uuid", c
 results = []
 
 try:
-    n_can = write_new_rows_by_key(sh, "Canada", df_can, key_col="uuid")
+    n_can = write_new_rows_by_key(sh, "Canada 2027", df_can, key_col="uuid")
     results.append(f"Canada: +{n_can} rows")
 except Exception as e:
     results.append(f"Canada: ERROR {e}")
 
 try:
-    n_usa = write_new_rows_by_key(sh, "USA", df_usa, key_col="uuid")
+    n_usa = write_new_rows_by_key(sh, "USA 2027", df_usa, key_col="uuid")
     results.append(f"USA: +{n_usa} rows")
 except Exception as e:
     results.append(f"USA: ERROR {e}")
