@@ -84,13 +84,13 @@ mapping_Q2 = {
 
 base_url = "https://sw2.decipherinc.com/rep/selfserve/4475/250910:img/"
 old_cols_can = [
-    'Q1r1', 'Q1r2', 'Q1r3', 'Q1r4', 'Q1r5', 'Q1r6', 'Q1r7', 'Q1r8', 'Q1r9', 'QProvincer11', 'Q1_r11r10', 'Q2', 'Q3_1', 'Q3_2', 'Q3_3', 'Q3_4', 'Q3_6', 'Q3_7', 'Q3_8', 'Q3_10', 'Q5_1', 'Q3_5', 'Q3_9', 'Q4_2','Q3_image1', None
+    'Q1r1', 'Q1r2', 'Q1r3', 'Q1r4', 'Q1r5', 'Q1r6', 'Q1r7', 'Q1r8', 'Q1r9', 'QProvincer11', 'Q1_r11r10', 'Q2', 'Q3_1', 'Q3_2', 'Q3_3', 'Q3_4', 'Q3_6', 'Q3_7', 'Q3_8', 'Q3_10', 'Q5_1', 'Q3_5', 'Q3_9', 'Q4_2','Q3_image1', None, 'date'
 ]
 old_cols_usa = [
-    'Q1r1', 'Q1r2', 'Q1r3', 'Q1r4', 'Q1r5', 'Q1r6', 'Q1r7', 'Q1r8', 'Q1r9', 'qStater10', 'Q1_r11r11', 'Q2', 'Q3_1', 'Q3_2', 'Q3_3', 'Q3_4', 'Q3_6', 'Q3_7', 'Q3_8', 'Q3_10', 'Q5_1', 'Q3_5', 'Q3_9', 'Q4_2','Q3_image1', None
+    'Q1r1', 'Q1r2', 'Q1r3', 'Q1r4', 'Q1r5', 'Q1r6', 'Q1r7', 'Q1r8', 'Q1r9', 'qStater10', 'Q1_r11r11', 'Q2', 'Q3_1', 'Q3_2', 'Q3_3', 'Q3_4', 'Q3_6', 'Q3_7', 'Q3_8', 'Q3_10', 'Q5_1', 'Q3_5', 'Q3_9', 'Q4_2','Q3_image1', None, 'date'
 ]
 old_cols_new = [
-    'Q1r1', 'Q1r2', 'Q1r3', 'Q1r4', 'Q1r5', 'Q1r6', 'Q1r7', 'Q1r8', 'Q1r9', None, None, None, 'Q3_1', 'Q3_2', 'Q3_3', 'Q3_4', 'Q3_6', 'Q3_7', 'Q3_8', 'Q3_10', 'Q5_1', 'Q3_5', 'Q3_9', 'Q4_2','Q3_image1', None
+    'Q1r1', 'Q1r2', 'Q1r3', 'Q1r4', 'Q1r5', 'Q1r6', 'Q1r7', 'Q1r8', 'Q1r9', None, None, None, 'Q3_1', 'Q3_2', 'Q3_3', 'Q3_4', 'Q3_6', 'Q3_7', 'Q3_8', 'Q3_10', 'Q5_1', 'Q3_5', 'Q3_9', 'Q4_2','Q3_image1', None, 'date'
 ]
 
 new_cols = [
@@ -119,7 +119,8 @@ new_cols = [
     "Product_Hero_SKU",
     "Product_link",
     "Product_Image",
-    "Forsta_Image"
+    "Forsta_Image",
+    "date"
 ]
 
 import pandas as pd
