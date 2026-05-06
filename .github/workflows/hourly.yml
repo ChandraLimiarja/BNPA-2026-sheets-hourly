@@ -2,7 +2,7 @@ name: run-hourly
 
 on:
   schedule:
-    # March–October (EDT = UTC-4)
+    # March–October (EDT = UTC-4) — local times 7am, 9am, 12pm, 3pm, 5pm
     - cron: "0 11 * 3-10 *"
     - cron: "0 13 * 3-10 *"
     - cron: "0 16 * 3-10 *"
@@ -25,16 +25,9 @@ jobs:
   run:
     runs-on: ubuntu-latest
     container: mcr.microsoft.com/playwright:v1.56.0-noble
-    env:
-      USE_FETCHED_COOKIE: true
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-
-      # - uses: actions/setup-python@v5
-      #   with:
-      #     python-version: "3.11"
-      #     cache: "pip"
-      #     cache-dependency-path: requirements.txt
 
       - name: Install uv
         run: |
@@ -47,16 +40,16 @@ jobs:
           path: ~/.cache/uv
           key: uv-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
           restore-keys: uv-${{ runner.os }}-
-      
-      - name: Install Python deps (uv)
-        run: uv pip install --system -r requirements.txt
+
+      - name: Install Python deps
+        run: uv pip install --system --break-system-packages -r requirements.txt
 
       - name: Get Forsta cookie
         id: cookie
         env:
-          FORSTA_USER: ${{ secrets.FORSTA_USER }}
-          FORSTA_PASS: ${{ secrets.FORSTA_PASS }}
-          FORSTA_LOGIN_URL: ${{ secrets.FORSTA_LOGIN_URL }}
+          FORSTA_USER:       ${{ secrets.FORSTA_USER }}
+          FORSTA_PASS:       ${{ secrets.FORSTA_PASS }}
+          FORSTA_LOGIN_URL:  ${{ secrets.FORSTA_LOGIN_URL }}
         run: python3 fetch_forsta_cookie.py
 
       - name: Run BNPA
