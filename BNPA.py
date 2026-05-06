@@ -321,8 +321,8 @@ surveys = [
 ]
 
 # ---------------- run ----------------
-api_key   = "z8ajshbwdkzwb5qms48ty5w85p8h4wvn4e2mytrh258n7hwwe3a6bm5mcxg806nv"
-client_id = "4475"
+api_key   = os.environ["FORSTA_API_KEY"]
+client_id = os.environ.get("FORSTA_CLIENT_ID", "4475")
 raw_dfs, clean_dfs = run_all_surveys(client_id, api_key, surveys)
 
 df_can = clean_dfs["can"]
