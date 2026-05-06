@@ -127,12 +127,23 @@ import pandas as pd
 import numpy as np
 import requests
 import os, textwrap
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 # ---------------- mappings, lists, etc. (from your file) ----------------
 # mapping_Q1_CAN, mapping_Q1_USA, mapping_Q2, base_url (per survey), old_cols_can/usa/new, new_cols
 # (kept as-is from your config)  # ← make sure these are defined as in your file
 
 # ---------------- helpers ----------------
+import threading
+
+_thread_local = threading.local()
+
+def _get_drive():
+    """One Drive service per worker thread, built lazily on first use."""
+    if not hasattr(_thread_local, "drive"):
+        _thread_local.drive = build_drive_service_oauth()
+    return _thread_local.drive
+    
 def clean_cast_column(series: pd.Series) -> pd.Series:
     series = series.replace(["<NA>", "nan", "NaN", "None", ""], pd.NA)
     numeric = pd.to_numeric(series, errors="coerce")
@@ -260,13 +271,11 @@ def transform_survey_v2(
 # ---------------- orchestrator (fixed arg order + per-survey q1_col + blank flag) ----------------
 def run_all_surveys(client_id: str, api_key: str, surveys: list):
     raw, cleaned = {}, {}
-    for s in surveys:
+
+    def _process_one(s):
         name, sid = s["name"], s["id"]
         df_raw = fetch_survey_df(client_id, sid, api_key)
-        raw[name] = df_raw
-
         base_url = f"https://sw2.decipherinc.com/rep/selfserve/{client_id}/{sid}:img/"
-
         df_clean = transform_survey_v2(
             df=df_raw,
             old_cols=s["old_cols"],
@@ -274,14 +283,20 @@ def run_all_surveys(client_id: str, api_key: str, surveys: list):
             base_url=base_url,
             mapping_q1=s.get("map_q1"),
             mapping_q2=s.get("map_q2"),
-            q1_col=s.get("q1_col", "QProvincer11"),   # allow per-survey override
+            q1_col=s.get("q1_col", "QProvincer11"),
             q2_col=s.get("q2_col", "Q2"),
             q2_other_col=s.get("q2_other_col", "Q2r11oe"),
             blank_if_no_mapping=s.get("blank_if_no_mapping", False),
             force_all_new_cols=True,
-            reorder_final=True
+            reorder_final=True,
         )
-        cleaned[name] = df_clean
+        return name, df_raw, df_clean
+
+    with ThreadPoolExecutor(max_workers=len(surveys)) as ex:
+        for name, df_raw, df_clean in ex.map(_process_one, surveys):
+            raw[name] = df_raw
+            cleaned[name] = df_clean
+
     return raw, cleaned
 
 # ---------------- config ----------------
@@ -482,7 +497,7 @@ def _fetch_and_upload_one(url: str, u: str, prod_name: str, folder_id: str, cook
 
     # 4) upload using the sniffed bytes + mime
     media = MediaIoBaseUpload(io.BytesIO(img_bytes), mimetype=mime, resumable=False)
-    f = build_drive_service_oauth().files().create(
+    f = _get_drive().files().create(
         body={"name": safe_name, "parents": [folder_id]},
         media_body=media,
         fields="id",
@@ -508,16 +523,17 @@ def mirror_df_product_images_with_uuid(
     df = df.copy()
     sess = _img_session()
 
+    # TO BE DELETED
     # Pre-filter: skip rows already mirrored, and those with blank url/uuid
-    rows = []
-    for url, u in zip(df[url_col].astype(str), df[uuid_col].astype(str)):
-        url = (url or "").strip()
-        u   = (u or "").strip()
-        if not url or not u or _is_drive_link(url):
-            rows.append(None)  # placeholder; we’ll keep as-is/blank below
-        else:
-            rows.append((url, u))
-    ok = fail = 0
+    # rows = []
+    # for url, u in zip(df[url_col].astype(str), df[uuid_col].astype(str)):
+    #     url = (url or "").strip()
+    #     u   = (u or "").strip()
+    #     if not url or not u or _is_drive_link(url):
+    #         rows.append(None)  # placeholder; we’ll keep as-is/blank below
+    #     else:
+    #         rows.append((url, u))
+    # ok = fail = 0
 
     # Threaded fetch+upload
     # build job list (skip blanks / already-mirrored)
@@ -610,9 +626,9 @@ def filter_new_rows(df: pd.DataFrame, existing: set[str]) -> pd.DataFrame:
     return df.loc[mask_new].copy()
 
 # Read existing UUIDs per tab
-uuids_can = get_existing_uuids(sh, "Canada")
-uuids_usa = get_existing_uuids(sh, "USA")
-uuids_new = get_existing_uuids(sh, "New & Noteworthy")
+uuids_can = get_existing_uuids(sh, "Canada") | get_existing_uuids(sh, "Canada 2027")
+uuids_usa = get_existing_uuids(sh, "USA")    | get_existing_uuids(sh, "USA 2027")
+uuids_new = get_existing_uuids(sh, "New & Noteworthy") #| get_existing_uuids(sh, "New & Noteworthy 2027")
 
 # Filter dataframes BEFORE mirroring/uploads
 df_can = filter_new_rows(df_can, uuids_can)
