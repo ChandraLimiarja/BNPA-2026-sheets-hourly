@@ -1,19 +1,15 @@
 name: run-hourly
 
 on:
-  schedule:
-    # March–October (EDT = UTC-4) — local times 7am, 9am, 12pm, 3pm, 5pm
-    - cron: "0 11 * 3-10 *"
-    - cron: "0 13 * 3-10 *"
-    - cron: "0 16 * 3-10 *"
-    - cron: "0 19 * 3-10 *"
-    - cron: "0 21 * 3-10 *"
+    schedule:
+    # March–October (EDT = UTC-4)
+    - cron: "0 12 * 3-10 *"  # 08:00 EDT
+    - cron: "0 16 * 3-10 *"  # 12:00 EDT
+    - cron: "0 20 * 3-10 *"  # 16:00 EDT
     # November–February (EST = UTC-5)
-    - cron: "0 12 * 11,12,1,2 *"
-    - cron: "0 14 * 11,12,1,2 *"
-    - cron: "0 17 * 11,12,1,2 *"
-    - cron: "0 20 * 11,12,1,2 *"
-    - cron: "0 22 * 11,12,1,2 *"
+    - cron: "0 13 * 11,12,1,2 *"  # 08:00 EST
+    - cron: "0 17 * 11,12,1,2 *"  # 12:00 EST
+    - cron: "0 21 * 11,12,1,2 *"  # 16:00 EST
   workflow_dispatch:
 
 # Prevent overlapping runs from racing on the sheet
