@@ -2,113 +2,65 @@ name: run-hourly
 
 on:
   schedule:
-    # -----------------------------------------
-    # ORIGINAL FULL SCHEDULE (kept for reference)
-    # -----------------------------------------
-    # Hourly windows (your local time mapping)
-    # - cron: "0 13-21 * 3-10 *"
-    # - cron: "0 14-22 * 11,12,1,2 *"
-    # # 12:00 AM local
-    # - cron: "0 4 * 3-10 *"      # 00:00 EDT = 04:00 UTC
-    # - cron: "0 5 * 11,12,1,2 *" # 00:00 EST = 05:00 UTC
-  
-    # -----------------------------------------
-    # REDUCED SCHEDULE (local times:
-    # 7am, 9am, 12pm, 3pm, 5pm)
-    # -----------------------------------------
-  
     # March–October (EDT = UTC-4)
-    - cron: "0 11 * 3-10 *"  # 07:00 EDT = 11:00 UTC
-    - cron: "0 13 * 3-10 *"  # 09:00 EDT = 13:00 UTC
-    - cron: "0 16 * 3-10 *"  # 12:00 EDT = 16:00 UTC
-    - cron: "0 19 * 3-10 *"  # 15:00 EDT = 19:00 UTC
-    - cron: "0 21 * 3-10 *"  # 17:00 EDT = 21:00 UTC
-  
+    - cron: "0 11 * 3-10 *"
+    - cron: "0 13 * 3-10 *"
+    - cron: "0 16 * 3-10 *"
+    - cron: "0 19 * 3-10 *"
+    - cron: "0 21 * 3-10 *"
     # November–February (EST = UTC-5)
-    - cron: "0 12 * 11,12,1,2 *" # 07:00 EST = 12:00 UTC
-    - cron: "0 14 * 11,12,1,2 *" # 09:00 EST = 14:00 UTC
-    - cron: "0 17 * 11,12,1,2 *" # 12:00 EST = 17:00 UTC
-    - cron: "0 20 * 11,12,1,2 *" # 15:00 EST = 20:00 UTC
-    - cron: "0 22 * 11,12,1,2 *" # 17:00 EST = 22:00 UTC
-  
+    - cron: "0 12 * 11,12,1,2 *"
+    - cron: "0 14 * 11,12,1,2 *"
+    - cron: "0 17 * 11,12,1,2 *"
+    - cron: "0 20 * 11,12,1,2 *"
+    - cron: "0 22 * 11,12,1,2 *"
   workflow_dispatch:
+
+# Prevent overlapping runs from racing on the sheet
+concurrency:
+  group: forsta-pipeline
+  cancel-in-progress: false
 
 jobs:
   run:
     runs-on: ubuntu-latest
-    container: mcr.microsoft.com/playwright:v1.56.0-noble   # ⬅ bump to 1.56.0
+    container: mcr.microsoft.com/playwright:v1.56.0-noble
     env:
-      PIP_CACHE_DIR: /tmp/pip-cache
       USE_FETCHED_COOKIE: true
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: requirements.txt
 
-      - name: Cache pip
-        uses: actions/cache@v4
-        with:
-          path: /tmp/pip-cache
-          key: pip-${{ runner.os }}-py311-${{ hashFiles('requirements.txt') }}
-          restore-keys: pip-${{ runner.os }}-py311-
+      - name: Install uv
+        run: pip install uv
 
-      - name: Install Python deps
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt
-          # playwright Python module only; browsers already in the image
-          if [ "${USE_FETCHED_COOKIE}" = "true" ]; then
-            python -m pip install "playwright==1.56.0"   # ⬅ pin to container version
-          fi
-      # --- Login and fetch cookie ---
+      - name: Install Python deps (uv)
+        run: uv pip install --system -r requirements.txt
+
       - name: Get Forsta cookie
         id: cookie
         env:
           FORSTA_USER: ${{ secrets.FORSTA_USER }}
           FORSTA_PASS: ${{ secrets.FORSTA_PASS }}
-          FORSTA_LOGIN_URL: ${{ secrets.FORSTA_LOGIN_URL }} # optional override
-        run: |
-          python fetch_forsta_cookie.py
-          base64 -w0 forsta_cookie.txt > cookie.b64
-          echo "FORSTA_COOKIE_B64=$(cat cookie.b64)" >> "$GITHUB_OUTPUT"
+          FORSTA_LOGIN_URL: ${{ secrets.FORSTA_LOGIN_URL }}
+        run: python fetch_forsta_cookie.py
 
-      # Optional: keep a copy as an artifact for debugging
-      - name: Upload cookie artifact (optional)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: forsta-cookie
-          path: forsta_cookie.txt
-          retention-days: 1
-      # --- Run BNPA script (no extra job nesting) ---
       - name: Run BNPA
         env:
-          FORSTA_API_KEY:       ${{ secrets.FORSTA_API_KEY }}
-          OAUTH_CLIENT_ID:      ${{ secrets.OAUTH_CLIENT_ID }}
-          OAUTH_CLIENT_SECRET:  ${{ secrets.OAUTH_CLIENT_SECRET }}
-          OAUTH_REFRESH_TOKEN:  ${{ secrets.OAUTH_REFRESH_TOKEN }}
+          FORSTA_API_KEY:              ${{ secrets.FORSTA_API_KEY }}
+          OAUTH_CLIENT_ID:             ${{ secrets.OAUTH_CLIENT_ID }}
+          OAUTH_CLIENT_SECRET:         ${{ secrets.OAUTH_CLIENT_SECRET }}
+          OAUTH_REFRESH_TOKEN:         ${{ secrets.OAUTH_REFRESH_TOKEN }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
-          SHEET_URL: ${{ secrets.SHEET_URL }}
-          TAB_NAME: "Test"
-          # >>> Toggle ONE of these lines <<<
-
-          # Use fetched cookie:
-          FORSTA_COOKIE_B64: ${{ steps.cookie.outputs.FORSTA_COOKIE_B64 }}
-          # Use manual cookie (GitHub secret):
-          # FORSTA_COOKIE: ${{ secrets.FORSTA_COOKIE }}
+          SHEET_URL:                   ${{ secrets.SHEET_URL }}
+          FORSTA_COOKIE_B64:           ${{ steps.cookie.outputs.FORSTA_COOKIE_B64 }}
         run: |
-          # decode if using fetched cookie
           if [ -n "${FORSTA_COOKIE_B64:-}" ]; then
             export FORSTA_COOKIE="$(printf %s "$FORSTA_COOKIE_B64" | base64 -d)"
           fi
           python BNPA.py
-      
-      # Optional: upload CSV snapshots for debugging the writes
-      - name: Upload New & Noteworthy CSV snapshot
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: new-and-noteworthy-new-rows
-          path: new_and_noteworthy_new_rows_*.csv
-          retention-days: 1
