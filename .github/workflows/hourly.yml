@@ -30,15 +30,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: "pip"
-          cache-dependency-path: requirements.txt
+      # - uses: actions/setup-python@v5
+      #   with:
+      #     python-version: "3.11"
+      #     cache: "pip"
+      #     cache-dependency-path: requirements.txt
 
       - name: Install uv
         run: pip install uv
 
+      - name: Cache uv
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/uv
+          key: uv-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+          restore-keys: uv-${{ runner.os }}-
+      
       - name: Install Python deps (uv)
         run: uv pip install --system -r requirements.txt
 
