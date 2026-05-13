@@ -82,15 +82,20 @@ mapping_Q2 = {
     11: "Other:"   # temporary placeholder
 }
 
+mapping_Q5_3b = {
+    1: "I would like to SAVE by pre-committing to the $20,000 winner's package (should my product win).",  
+    2: "At the time of the winner's announcement, I will decide if I would like to proceed with the $25,000 winner's package."
+}
+
 base_url = "https://sw2.decipherinc.com/rep/selfserve/4475/250910:img/"
 old_cols_can = [
-    'Q1r1', 'Q1r2', 'Q1r3', 'Q1r4', 'Q1r5', 'Q1r6', 'Q1r7', 'Q1r8', 'Q1r9', 'QProvincer11', 'Q1_r11r10', 'Q2', 'Q3_1', 'Q3_2', 'Q3_3', 'Q3_4', 'Q3_6', 'Q3_7', 'Q3_8', 'Q3_10', 'Q5_1', 'Q3_5', 'Q3_9', 'Q4_2','Q3_image1', None, 'date'
+    'Q1r1', 'Q1r2', 'Q1r3', 'Q1r4', 'Q1r5', 'Q1r6', 'Q1r7', 'Q1r8', 'Q1r9', 'QProvincer11', 'Q1_r11r10', 'Q2', 'Q3_1', 'Q3_2', 'Q3_3', 'Q3_4', 'Q3_6', 'Q3_7', 'Q3_8', 'Q3_10', 'Q5_1', 'Q3_5', 'Q3_9', 'Q4_2','Q3_image1', None, 'date', 'Q5_3b'
 ]
 old_cols_usa = [
-    'Q1r1', 'Q1r2', 'Q1r3', 'Q1r4', 'Q1r5', 'Q1r6', 'Q1r7', 'Q1r8', 'Q1r9', 'qStater10', 'Q1_r11r11', 'Q2', 'Q3_1', 'Q3_2', 'Q3_3', 'Q3_4', 'Q3_6', 'Q3_7', 'Q3_8', 'Q3_10', 'Q5_1', 'Q3_5', 'Q3_9', 'Q4_2','Q3_image1', None, 'date'
+    'Q1r1', 'Q1r2', 'Q1r3', 'Q1r4', 'Q1r5', 'Q1r6', 'Q1r7', 'Q1r8', 'Q1r9', 'qStater10', 'Q1_r11r11', 'Q2', 'Q3_1', 'Q3_2', 'Q3_3', 'Q3_4', 'Q3_6', 'Q3_7', 'Q3_8', 'Q3_10', 'Q5_1', 'Q3_5', 'Q3_9', 'Q4_2','Q3_image1', None, 'date', 'Q5_3b'
 ]
 old_cols_new = [
-    'Q1r1', 'Q1r2', 'Q1r3', 'Q1r4', 'Q1r5', 'Q1r6', 'Q1r7', 'Q1r8', 'Q1r9', None, None, None, 'Q3_1', 'Q3_2', 'Q3_3', 'Q3_4', 'Q3_6', 'Q3_7', 'Q3_8', 'Q3_10', 'Q5_1', 'Q3_5', 'Q3_9', 'Q4_2','Q3_image1', None, 'date'
+    'Q1r1', 'Q1r2', 'Q1r3', 'Q1r4', 'Q1r5', 'Q1r6', 'Q1r7', 'Q1r8', 'Q1r9', None, None, None, 'Q3_1', 'Q3_2', 'Q3_3', 'Q3_4', 'Q3_6', 'Q3_7', 'Q3_8', 'Q3_10', 'Q5_1', 'Q3_5', 'Q3_9', 'Q4_2','Q3_image1', None, 'date', 'Q5_3b'
 ]
 
 new_cols = [
@@ -120,7 +125,8 @@ new_cols = [
     "Product_link",
     "Product_Image",
     "Forsta_Image",
-    "date"
+    "date",
+    "Winner_Package"
 ]
 
 import pandas as pd
@@ -231,6 +237,9 @@ def transform_survey_v2(
     # Q5 simple map (still source name pre-rename)
     if "Q5_1" in out.columns:
         out["Q5_1"] = out["Q5_1"].map({1: "Yes", 2: "No"})
+
+    if "Q5_3b" in out.columns:
+        out["Q5_3b"] = out["Q5_3b"].map(mapping_Q5_3b)
 
     # --------- SELECT + RENAME ---------
     keep = (['uuid'] if 'uuid' in out.columns else []) + [c for c in old_cols if c and c in out.columns]
